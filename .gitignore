@@ -1,0 +1,27 @@
+build
+**/__pycache__
+*.pyo
+*.pyc
+*.pyd
+pymonocypher.egg-info
+
+# Compiled Object files
+c_monocypher.c
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.elf
+*.objdump
+*.flash
+*.map
+
+# Editor swap/backup file garbage
+.*.swp
+.*.swo
+~*.docx
+~*.xlsx
+*.tmp
+
+.idea
+.settings
