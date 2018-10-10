@@ -1,8 +1,8 @@
 """
 Monocypher library Python bindings.
- 
+
 Monocypher is an easy to use, easy to deploy, auditable crypto library
-written in portable C.  
+written in portable C.
 """
 
 from libc.stdint cimport uint8_t, uint32_t, uint64_t
@@ -33,14 +33,14 @@ cdef extern from "monocypher.h":
         uint64_t            ad_size
         uint64_t            message_size
         int                 ad_phase
-        
+
     ctypedef struct crypto_lock_ctx:
         crypto_chacha_ctx   chacha
         crypto_poly1305_ctx poly
         uint64_t            ad_size
         uint64_t            message_size
         int                 ad_phase
-        
+
     # Hash (Blake2b)
     ctypedef struct crypto_blake2b_ctx:
         uint64_t hash[8]
@@ -272,18 +272,18 @@ cdef extern from "monocypher.h":
                       const uint8_t your_secret_key  [32],
                       const uint8_t their_public_key [32])
 
-                      
+
 def wipe(data):
     """Wipe a bytes object from memory.
-    
+
     :param data: The bytes object to clear.
-    
+
     WARNING: this violates the Python memory model and may result in corrupted
     data.  Ensure that the data to wipe is the only active reference!
     """
     crypto_wipe(data, len(data))
 
-                      
+
 def lock(key, nonce, message, associated_data=None):
     """Perform authenticated encryption.
 
@@ -329,7 +329,7 @@ def unlock(key, nonce, mac, message, associated_data=None):
 
 cdef class Encrypt:
     cdef crypto_lock_ctx _ctx
-    
+
     """Incrementally encrypt a message with authentication.
 
     :param key: The 32-byte symmetric key.
@@ -340,7 +340,7 @@ cdef class Encrypt:
         associated_data = b'' if associated_data is None else associated_data
         crypto_lock_init(&self._ctx, key, nonce)
         if associated_data and len(associated_data):
-            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))        
+            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
 
     def update(self, message):
         """Add new data to the payload.
@@ -361,7 +361,7 @@ cdef class Encrypt:
         crypto_lock_final(&self._ctx, mac)
         return mac
 
-        
+
 cdef class Decrypt:
     cdef crypto_lock_ctx _ctx
 
@@ -378,7 +378,7 @@ cdef class Decrypt:
     def finalize(self, mac):
         return crypto_unlock_final(&self._ctx, mac)
 
-        
+
 def chacha20(key, nonce, message):
     """Encrypt/Decrypt a message with ChaCha20.
 
@@ -401,8 +401,8 @@ def chacha20(key, nonce, message):
     crypto_chacha20_init(&ctx, key, nonce)
     crypto_chacha20_encrypt(&ctx, result, message, len(message))
     return result
-        
-    
+
+
 def blake2b(msg, key=None):
     key = b'' if key is None else key
     if isinstance(msg, str):
@@ -442,14 +442,14 @@ cdef class Blake2b:
         crypto_blake2b_final(&self._ctx, hash)
         return hash
 
-        
+
 def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None):
     key = b'' if key is None else key
     ad = b'' if ad is None else ad
     hash = bytes(32)
     work_area = malloc(nb_blocks * 1024)
     try:
-        crypto_argon2i_general(hash, len(hash), work_area, 
+        crypto_argon2i_general(hash, len(hash), work_area,
                                nb_blocks, nb_iterations,
                                password, len(password),
                                salt, len(salt),
@@ -475,7 +475,7 @@ def key_exchange(your_secret_key, their_public_key):
         raise ValueError('key_exchange failed')
     return p
 
-    
+
 def public_key_compute(secret_key):
     """Generate the public key from the secret key.
 
@@ -485,8 +485,8 @@ def public_key_compute(secret_key):
     public_key = bytes(32)
     crypto_sign_public_key(public_key, secret_key)
     return public_key
-    
-    
+
+
 def signature_sign(secret_key, message):
     """Cryptographically sign a messge.
 
@@ -516,10 +516,10 @@ def signature_check(signature, public_key, message):
     """
     return 0 == crypto_check(signature, public_key, message, len(message))
 
-    
+
 cdef class SignatureVerify:
     cdef crypto_check_ctx _ctx
-    
+
     """Incrementally verify a message.
 
     :param signature: The 64-byte signature.
@@ -544,7 +544,7 @@ cdef class SignatureVerify:
 
 # def entropy(message):
 #     """Compute the normalized entropy of a message.
-# 
+#
 #     :param message: The bytes object containing the data.
 #     :return: The normalized entropy from 0.0 (constant value) to
 #         1.0 (statistically random).

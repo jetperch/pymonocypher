@@ -16,3 +16,17 @@ uses Monocypher.
 
 The Python binding API mirrors the underlying C API, but with 
 simplifications to only pass bytes objects, not uint8_t * and length.
+
+
+## Installation
+
+You can install directly from pypi:
+
+    pip install pymonocypher
+    
+You can then use pymonocypher:
+
+    python
+    >>> import monocypher
+    >>> monocypher.blake2b(b'hello world')
+

@@ -14,15 +14,14 @@ MYPATH = os.path.abspath(os.path.dirname(__file__))
 
 try:
     from Cython.Build import cythonize
-    USE_CYTHON = True
-    ext = '.pyx'
+    USE_CYTHON = os.path.isfile(os.path.join(MYPATH, 'c_monocypher.pyx'))
 except ImportErorr:
     USE_CYTHON = False
-    ext = '.c'
 
 
+ext = '.pyx' if USE_CYTHON else '.c'
 extensions = [
-    setuptools.Extension('monocypher', 
+    setuptools.Extension('monocypher',
         sources=['c_monocypher' + ext, 'monocypher.c'],
         include_dirs=['.'],
     ),
@@ -60,13 +59,15 @@ setuptools.setup(
         'Topic :: Security :: Cryptography',
 
         # Supported Python versions
+        'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: C',
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
-    packages=['monocypher'],
     install_requires = [],
     ext_modules=extensions,
 
