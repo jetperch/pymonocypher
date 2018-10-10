@@ -4,7 +4,7 @@
 This file contains the list of changes made to pymonocypher.
 
 
-## 0.1.0
+## 0.1.1
 
 2018 Oct 9
 
