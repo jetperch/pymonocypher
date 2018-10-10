@@ -15,7 +15,7 @@ MYPATH = os.path.abspath(os.path.dirname(__file__))
 try:
     from Cython.Build import cythonize
     USE_CYTHON = os.path.isfile(os.path.join(MYPATH, 'c_monocypher.pyx'))
-except ImportErorr:
+except ImportError:
     USE_CYTHON = False
 
 
@@ -39,7 +39,7 @@ with open(os.path.join(MYPATH, 'README.md'), encoding='utf-8') as f:
 
 setuptools.setup(
     name='pymonocypher',
-    version='0.1.1',
+    version='0.1.2',
     description='Python ctypes bindings to the Monocypher library',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -66,6 +66,9 @@ setuptools.setup(
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
     install_requires = [],
+    extras_require={
+        'dev': ['check-manifest', 'Cython', 'coverage'],
+    },    
     ext_modules=extensions,
 
     project_urls={
