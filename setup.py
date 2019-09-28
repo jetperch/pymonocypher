@@ -39,7 +39,7 @@ with open(os.path.join(MYPATH, 'README.md'), encoding='utf-8') as f:
 
 setuptools.setup(
     name='pymonocypher',
-    version='0.1.2',
+    version='0.1.3',
     description='Python ctypes bindings to the Monocypher library',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -68,7 +68,7 @@ setuptools.setup(
     install_requires = [],
     extras_require={
         'dev': ['check-manifest', 'Cython', 'coverage'],
-    },    
+    },
     ext_modules=extensions,
 
     project_urls={

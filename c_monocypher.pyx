@@ -9,6 +9,8 @@ from libc.stdint cimport uint8_t, uint32_t, uint64_t
 from libc.stdlib cimport malloc, free
 import binascii
 import secrets
+import warnings
+
 
 cdef extern from "monocypher.h":
 
@@ -461,6 +463,17 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None):
     return hash
 
 
+def compute_key_exchange_public_key(secret_key):
+    """Generate the public key for key exchange from the secret key.
+
+    :param secret_key: The 32-byte secret key.
+    :return: The 32-byte public key for :func:`key_exchange`.
+    """
+    public_key = bytes(32)
+    crypto_x25519_public_key(public_key, secret_key)
+    return public_key
+
+
 def key_exchange(your_secret_key, their_public_key):
     """Compute a shared secret based upon public-key crytography.
 
@@ -476,7 +489,7 @@ def key_exchange(your_secret_key, their_public_key):
     return p
 
 
-def public_key_compute(secret_key):
+def compute_signing_public_key(secret_key):
     """Generate the public key from the secret key.
 
     :param secret_key: The 32-byte secret key.
@@ -485,6 +498,11 @@ def public_key_compute(secret_key):
     public_key = bytes(32)
     crypto_sign_public_key(public_key, secret_key)
     return public_key
+
+
+def public_key_compute(secret_key):
+    warnings.warn("deprecated: use compute_signing_public_key", DeprecationWarning)
+    return compute_signing_public_key(secret_key)
 
 
 def signature_sign(secret_key, message):
@@ -592,13 +610,31 @@ def generate_key(length=None, method=None):
     return key
 
 
-def generate_key_pair():
-    """Generate and print a new keypair using default settings.
+def generate_signing_key_pair():
+    """Generate and print a new keypair for signing using default settings.
 
     :return (secret, public).
     """
     secret = generate_key()
-    public = public_key_compute(secret)
+    public = compute_signing_public_key(secret)
+    print('secret = %s\npublic = %s' % (
+        binascii.hexlify(secret),
+        binascii.hexlify(public)))
+    return secret, public
+
+
+def generate_key_pair():
+    warnings.warn("deprecated: use generate_signing_key_pair", DeprecationWarning)
+    return generate_signing_key_pair()
+
+
+def generate_key_exchange_key_pair():
+    """Generate and print a new keypair for key exchange using default settings.
+
+    :return (secret, public).
+    """
+    secret = generate_key()
+    public = compute_key_exchange_public_key(secret)
     print('secret = %s\npublic = %s' % (
         binascii.hexlify(secret),
         binascii.hexlify(public)))
