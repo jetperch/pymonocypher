@@ -451,12 +451,14 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None):
     hash = bytes(32)
     work_area = malloc(nb_blocks * 1024)
     try:
-        crypto_argon2i_general(hash, len(hash), work_area,
-                               nb_blocks, nb_iterations,
-                               password, len(password),
-                               salt, len(salt),
-                               key, len(key),
-                               ad, len(ad))
+        crypto_argon2i_general(hash, <uint32_t> len(hash), 
+                               work_area,
+                               <uint32_t> nb_blocks, 
+                               <uint32_t> nb_iterations,
+                               password, <uint32_t> len(password),
+                               salt, <uint32_t> len(salt),
+                               key, <uint32_t> len(key),
+                               ad, <uint32_t> len(ad))
     finally:
         free(work_area)
     crypto_wipe(password, len(password))

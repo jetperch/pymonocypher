@@ -24,12 +24,15 @@ extensions = [
     setuptools.Extension('monocypher',
         sources=['c_monocypher' + ext, 'monocypher.c'],
         include_dirs=['.'],
+        extra_compile_args=['-DBLAKE2_NO_UNROLLING'],
     ),
 ]
 
 if USE_CYTHON:
     from Cython.Build import cythonize
-    extensions = cythonize(extensions)
+    extensions = cythonize(
+        extensions, 
+        compiler_directives={'language_level': '3'})
 
 
 # Get the long description from the README file
