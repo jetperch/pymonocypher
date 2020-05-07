@@ -14,11 +14,18 @@ import warnings
 
 cdef extern from "monocypher.h":
 
-    # Chacha20
-    ctypedef struct crypto_chacha_ctx:
-        uint32_t input[16] # current input, unencrypted
-        uint32_t pool [16] # last input, encrypted
-        size_t   pool_idx  # pointer to random_pool
+    # Vtable for EdDSA with a custom hash.
+    # Instantiate it to define a custom hash.
+    # Its size, contents, and layout, are part of the public API.
+    ctypedef struct crypto_sign_vtable:
+        void (*hash)(uint8_t hash[64], const uint8_t *message, size_t message_size);
+        void (*init  )(void *ctx);
+        void (*update)(void *ctx, const uint8_t *message, size_t message_size);
+        void (*final )(void *ctx, uint8_t hash[64]);
+        size_t ctx_size;
+
+    # Do not rely on the size or contents of any of the types below,
+    # they may change without notice.
 
     # Poly1305
     ctypedef struct crypto_poly1305_ctx:
@@ -27,21 +34,6 @@ cdef extern from "monocypher.h":
         uint32_t c[5]   # chunk of the message
         uint32_t pad[4] # random number added at the end (from the secret key)
         size_t   c_idx  # How many bytes are there in the chunk.
-
-    # Authenticated encryption
-    ctypedef struct crypto_lock_ctx:
-        crypto_chacha_ctx   chacha
-        crypto_poly1305_ctx poly
-        uint64_t            ad_size
-        uint64_t            message_size
-        int                 ad_phase
-
-    ctypedef struct crypto_lock_ctx:
-        crypto_chacha_ctx   chacha
-        crypto_poly1305_ctx poly
-        uint64_t            ad_size
-        uint64_t            message_size
-        int                 ad_phase
 
     # Hash (Blake2b)
     ctypedef struct crypto_blake2b_ctx:
@@ -61,6 +53,24 @@ cdef extern from "monocypher.h":
         uint8_t sig[64]
         uint8_t pk [32]
 
+    # Signatures (EdDSA)
+    ctypedef struct crypto_sign_ctx_abstract:
+        const crypto_sign_vtable *hash;
+        uint8_t buf[96];
+        uint8_t pk [32];
+
+    ctypedef struct  crypto_check_ctx_abstract:
+        const crypto_sign_vtable *hash;
+        uint8_t buf[96];
+        uint8_t pk [32];
+
+    ctypedef struct crypto_sign_ctx:
+        crypto_sign_ctx_abstract ctx;
+        crypto_blake2b_ctx       hash;
+
+    ctypedef struct crypto_check_ctx:
+        crypto_sign_ctx_abstract ctx;
+        crypto_blake2b_ctx       hash;
 
     # ////////////////////////////
     # /// High level interface ///
@@ -110,32 +120,6 @@ cdef extern from "monocypher.h":
                            const uint8_t *ad         , size_t ad_size,
                            const uint8_t *cipher_text, size_t text_size)
 
-    # Incremental interface (encryption)
-    void crypto_lock_init(crypto_lock_ctx *ctx,
-                          const uint8_t    key[32],
-                          const uint8_t    nonce[24])
-    void crypto_lock_auth_ad(crypto_lock_ctx *ctx,
-                             const uint8_t   *message,
-                             size_t           message_size)
-    void crypto_lock_auth_message(crypto_lock_ctx *ctx,
-                                  const uint8_t *cipher_text, size_t text_size)
-    void crypto_lock_update(crypto_lock_ctx *ctx,
-                            uint8_t         *cipher_text,
-                            const uint8_t   *plain_text,
-                            size_t           text_size)
-    void crypto_lock_final(crypto_lock_ctx *ctx, uint8_t mac[16])
-
-    # Incremental interface (decryption)
-    #define crypto_unlock_init         crypto_lock_init
-    #define crypto_unlock_auth_ad      crypto_lock_auth_ad
-    #define crypto_unlock_auth_message crypto_lock_auth_message
-    void crypto_unlock_update(crypto_lock_ctx *ctx,
-                              uint8_t           *plain_text,
-                              const uint8_t     *cipher_text,
-                              size_t             text_size)
-    int crypto_unlock_final(crypto_lock_ctx *ctx, const uint8_t mac[16])
-
-
     # General purpose hash (Blake2b)
     # ------------------------------
 
@@ -156,6 +140,8 @@ cdef extern from "monocypher.h":
     void crypto_blake2b_general_init(crypto_blake2b_ctx *ctx, size_t hash_size,
                                      const uint8_t      *key, size_t key_size)
 
+    # vtable for signatures
+    cdef extern crypto_sign_vtable crypto_blake2b_vtable;
 
     # Password key derivation (Argon2 i)
     # ----------------------------------
@@ -177,7 +163,7 @@ cdef extern from "monocypher.h":
     # Key exchange (x25519 + HChacha20)
     # ---------------------------------
     #define crypto_key_exchange_public_key crypto_x25519_public_key
-    int crypto_key_exchange(uint8_t       shared_key      [32],
+    void crypto_key_exchange(uint8_t       shared_key      [32],
                             const uint8_t your_secret_key [32],
                             const uint8_t their_public_key[32])
 
@@ -199,23 +185,52 @@ cdef extern from "monocypher.h":
                      const uint8_t *message, size_t message_size)
 
     # Incremental interface for signatures (2 passes)
-    void crypto_sign_init_first_pass(crypto_sign_ctx *ctx,
+    void crypto_sign_init_first_pass(crypto_sign_ctx_abstract *ctx,
                                      const uint8_t  secret_key[32],
                                      const uint8_t  public_key[32])
-    void crypto_sign_update(crypto_sign_ctx *ctx,
+    void crypto_sign_update(crypto_sign_ctx_abstract *ctx,
                             const uint8_t *message, size_t message_size)
-    void crypto_sign_init_second_pass(crypto_sign_ctx *ctx)
+    void crypto_sign_init_second_pass(crypto_sign_ctx_abstract *ctx)
     # use crypto_sign_update() again.
-    void crypto_sign_final(crypto_sign_ctx *ctx, uint8_t signature[64])
+    void crypto_sign_final(crypto_sign_ctx_abstract *ctx, uint8_t signature[64])
 
     # Incremental interface for verification (1 pass)
-    void crypto_check_init  (crypto_check_ctx *ctx,
+    void crypto_check_init  (crypto_sign_ctx_abstract *ctx,
                              const uint8_t signature[64],
                              const uint8_t public_key[32])
-    void crypto_check_update(crypto_check_ctx *ctx,
+    void crypto_check_update(crypto_sign_ctx_abstract *ctx,
                              const uint8_t *message, size_t message_size)
-    int crypto_check_final  (crypto_check_ctx *ctx)
+    int crypto_check_final  (crypto_sign_ctx_abstract *ctx)
 
+    # Custom hash interface
+    void crypto_sign_public_key_custom_hash(uint8_t       public_key[32],
+                                            const uint8_t secret_key[32],
+                                            const crypto_sign_vtable *hash)
+    void crypto_sign_init_first_pass_custom_hash(crypto_sign_ctx_abstract *ctx,
+                                                 const uint8_t secret_key[32],
+                                                 const uint8_t public_key[32],
+                                                 const crypto_sign_vtable *hash)
+    void crypto_check_init_custom_hash(crypto_check_ctx_abstract *ctx,
+                                       const uint8_t signature[64],
+                                       const uint8_t public_key[32],
+                                       const crypto_sign_vtable *hash)
+
+    # EdDSA to X25519
+    # ---------------
+    void crypto_from_eddsa_private(uint8_t x25519[32], const uint8_t eddsa[32])
+    void crypto_from_eddsa_public (uint8_t x25519[32], const uint8_t eddsa[32])
+    
+    # Elligator 2
+    # -----------
+    
+    # Elligator mappings proper
+    void crypto_hidden_to_curve(uint8_t curve [32], const uint8_t hidden[32])
+    int  crypto_curve_to_hidden(uint8_t hidden[32], const uint8_t curve [32],
+                                uint8_t tweak)
+    
+    # Easy to use key pair generation
+    void crypto_hidden_key_pair(uint8_t hidden[32], uint8_t secret_key[32],
+                                uint8_t seed[32])
 
     # ////////////////////////////
     # /// Low level primitives ///
@@ -228,28 +243,43 @@ cdef extern from "monocypher.h":
     # --------
 
     # Specialised hash.
-    void crypto_chacha20_H(uint8_t       out[32],
-                           const uint8_t key[32],
-                           const uint8_t in_ [16])
+    void crypto_hchacha20(uint8_t       out[32],
+                          const uint8_t key[32],
+                          const uint8_t in_ [16])
 
-    void crypto_chacha20_init(crypto_chacha_ctx *ctx,
-                              const uint8_t      key[32],
-                              const uint8_t      nonce[8])
-
-    void crypto_chacha20_x_init(crypto_chacha_ctx *ctx,
-                                const uint8_t      key[32],
-                                const uint8_t      nonce[24])
-
-    void crypto_chacha20_set_ctr(crypto_chacha_ctx *ctx, uint64_t ctr)
-
-    void crypto_chacha20_encrypt(crypto_chacha_ctx *ctx,
-                                 uint8_t           *cipher_text,
-                                 const uint8_t     *plain_text,
-                                 size_t             text_size)
-
-    void crypto_chacha20_stream(crypto_chacha_ctx *ctx,
-                                uint8_t *stream, size_t size)
-
+    void crypto_chacha20(uint8_t       *cipher_text,
+                         const uint8_t *plain_text,
+                         size_t         text_size,
+                         const uint8_t  key[32],
+                         const uint8_t  nonce[8])
+    void crypto_xchacha20(uint8_t       *cipher_text,
+                          const uint8_t *plain_text,
+                          size_t         text_size,
+                          const uint8_t  key[32],
+                          const uint8_t  nonce[24])
+    void crypto_ietf_chacha20(uint8_t       *cipher_text,
+                              const uint8_t *plain_text,
+                              size_t         text_size,
+                              const uint8_t  key[32],
+                              const uint8_t  nonce[12])
+    uint64_t crypto_chacha20_ctr(uint8_t       *cipher_text,
+                                 const uint8_t *plain_text,
+                                 size_t         text_size,
+                                 const uint8_t  key[32],
+                                 const uint8_t  nonce[8],
+                                 uint64_t       ctr)
+    uint64_t crypto_xchacha20_ctr(uint8_t       *cipher_text,
+                                  const uint8_t *plain_text,
+                                  size_t         text_size,
+                                  const uint8_t  key[32],
+                                  const uint8_t  nonce[24],
+                                  uint64_t       ctr)
+    uint32_t crypto_ietf_chacha20_ctr(uint8_t       *cipher_text,
+                                      const uint8_t *plain_text,
+                                      size_t         text_size,
+                                      const uint8_t  key[32],
+                                      const uint8_t  nonce[12],
+                                      uint32_t       ctr)
 
     # Poly 1305
     # ---------
@@ -270,10 +300,20 @@ cdef extern from "monocypher.h":
     # -------
     void crypto_x25519_public_key(uint8_t       public_key[32],
                                   const uint8_t secret_key[32])
-    int crypto_x25519(uint8_t       raw_shared_secret[32],
+    void crypto_x25519(uint8_t       raw_shared_secret[32],
                       const uint8_t your_secret_key  [32],
                       const uint8_t their_public_key [32])
 
+    # "Dirty" versions of x25519_public_key()
+    # Only use to generate ephemeral keys you want to hide.
+    void crypto_x25519_dirty_small(uint8_t pk[32], const uint8_t sk[32])
+    void crypto_x25519_dirty_fast (uint8_t pk[32], const uint8_t sk[32])
+    
+    # scalar division
+    # ---------------
+    void crypto_x25519_inverse(uint8_t       blind_salt [32],
+                               const uint8_t private_key[32],
+                               const uint8_t curve_point[32])
 
 def wipe(data):
     """Wipe a bytes object from memory.
@@ -329,56 +369,58 @@ def unlock(key, nonce, mac, message, associated_data=None):
     return plain_text
 
 
-cdef class Encrypt:
-    cdef crypto_lock_ctx _ctx
+# todo remove
+#cdef class Encrypt:
+#    cdef crypto_lock_ctx _ctx
+#
+#    """Incrementally encrypt a message with authentication.
+#
+#    :param key: The 32-byte symmetric key.
+#    :param nonce: The 24-byte nonce.
+#    :param associated_data: The optional associated data for AEAD.
+#    """
+#    def __cinit__(self, key, nonce, associated_data=None):
+#        associated_data = b'' if associated_data is None else associated_data
+#        crypto_lock_init(&self._ctx, key, nonce)
+#        if associated_data and len(associated_data):
+#            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
+#
+#    def update(self, message):
+#        """Add new data to the payload.
+#
+#        :param message: Additional data.
+#        :return: The encrypted data.
+#        """
+#        crypto_text = bytes(len(message))
+#        crypto_lock_update(&self._ctx, crypto_text, message, len(message))
+#        return crypto_text
+#
+#    def finalize(self):
+#        """Finalize the authenticated encryption.
+#
+#        :return: The 16-byte message authentication code (MAC).
+#        """
+#        mac = bytes(16)
+#        crypto_lock_final(&self._ctx, mac)
+#        return mac
 
-    """Incrementally encrypt a message with authentication.
 
-    :param key: The 32-byte symmetric key.
-    :param nonce: The 24-byte nonce.
-    :param associated_data: The optional associated data for AEAD.
-    """
-    def __cinit__(self, key, nonce, associated_data=None):
-        associated_data = b'' if associated_data is None else associated_data
-        crypto_lock_init(&self._ctx, key, nonce)
-        if associated_data and len(associated_data):
-            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
-
-    def update(self, message):
-        """Add new data to the payload.
-
-        :param message: Additional data.
-        :return: The encrypted data.
-        """
-        crypto_text = bytes(len(message))
-        crypto_lock_update(&self._ctx, crypto_text, message, len(message))
-        return crypto_text
-
-    def finalize(self):
-        """Finalize the authenticated encryption.
-
-        :return: The 16-byte message authentication code (MAC).
-        """
-        mac = bytes(16)
-        crypto_lock_final(&self._ctx, mac)
-        return mac
-
-
-cdef class Decrypt:
-    cdef crypto_lock_ctx _ctx
-
-    def __init__(self, key, nonce, associated_data=None):
-        crypto_lock_init(&self._ctx, key, nonce)
-        if associated_data and len(associated_data):
-            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
-
-    def update(self, message):
-        plain_text = bytes(len(message))
-        crypto_unlock_update(&self._ctx, plain_text, message, len(message))
-        return plain_text
-
-    def finalize(self, mac):
-        return crypto_unlock_final(&self._ctx, mac)
+# todo remove
+#cdef class Decrypt:
+#    cdef crypto_lock_ctx _ctx
+#
+#    def __init__(self, key, nonce, associated_data=None):
+#        crypto_lock_init(&self._ctx, key, nonce)
+#        if associated_data and len(associated_data):
+#            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
+#
+#    def update(self, message):
+#        plain_text = bytes(len(message))
+#        crypto_unlock_update(&self._ctx, plain_text, message, len(message))
+#        return plain_text
+#
+#    def finalize(self, mac):
+#        return crypto_unlock_final(&self._ctx, mac)
 
 
 def chacha20(key, nonce, message):
@@ -389,19 +431,14 @@ def chacha20(key, nonce, message):
     :param message: The message to encrypt or decrypt.
     :return: The message XOR'ed with the ChaCha20 stream.
     """
-    cdef crypto_chacha_ctx ctx
+    result = bytes(len(message))
     if 24 == len(nonce):
-        derived_key = bytes(32)
-        crypto_chacha20_H(derived_key, key, nonce)
-        key = derived_key
-        nonce = nonce[16:]
+        crypto_xchacha20(result, message, len(message), key, nonce)
     elif 8 == len(nonce):
+        crypto_chacha20(result, message, len(message), key, nonce)
         pass
     else:
         raise ValueError('invalid nonce length')
-    result = bytes(len(message))
-    crypto_chacha20_init(&ctx, key, nonce)
-    crypto_chacha20_encrypt(&ctx, result, message, len(message))
     return result
 
 
@@ -485,9 +522,7 @@ def key_exchange(your_secret_key, their_public_key):
         computed using their_secret_key and your_public_key.
     """
     p = bytes(32)
-    rc = crypto_key_exchange(p, your_secret_key, their_public_key)
-    if 0 != rc:
-        raise ValueError('key_exchange failed')
+    crypto_key_exchange(p, your_secret_key, their_public_key)
     return p
 
 
@@ -538,7 +573,7 @@ def signature_check(signature, public_key, message):
 
 
 cdef class SignatureVerify:
-    cdef crypto_check_ctx _ctx
+    cdef crypto_sign_ctx_abstract _ctx
 
     """Incrementally verify a message.
 
