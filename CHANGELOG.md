@@ -4,6 +4,13 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 0.1.5
+
+2020 May 7
+
+*   Upgraded to Monocypher 3.1.0.
+
+
 ## 0.1.4
 
 2019 Oct 22

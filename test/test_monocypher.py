@@ -61,16 +61,17 @@ class TestMonocypher(unittest.TestCase):
             self.assertNotEqual(msg, c)
             self.assertEqual(msg, msg2)
 
-            e = monocypher.Encrypt(key, nonce)
-            c2 = e.update(msg)
-            mac2 = e.finalize()
-            self.assertEqual(mac, mac2)
-            self.assertEqual(c, c2)
-
-            d = monocypher.Decrypt(key, nonce)
-            msg3 = d.update(c2)
-            self.assertEqual(0, d.finalize(mac2))
-            self.assertEqual(msg, msg3)
+# todo remove
+#           e = monocypher.Encrypt(key, nonce)
+#           c2 = e.update(msg)
+#           mac2 = e.finalize()
+#           self.assertEqual(mac, mac2)
+#           self.assertEqual(c, c2)
+#
+#           d = monocypher.Decrypt(key, nonce)
+#           msg3 = d.update(c2)
+#           self.assertEqual(0, d.finalize(mac2))
+#           self.assertEqual(msg, msg3)
 
     def test_symmetric_aead(self):
         random = np.random.RandomState(seed=1)
@@ -85,16 +86,17 @@ class TestMonocypher(unittest.TestCase):
             msg2 = monocypher.unlock(key, nonce, mac, c, associated_data=aead)
             self.assertEqual(msg, msg2)
 
-            e = monocypher.Encrypt(key, nonce, associated_data=aead)
-            c2 = e.update(msg)
-            mac2 = e.finalize()
-            self.assertEqual(mac, mac2)
-            self.assertEqual(c, c2)
-
-            d = monocypher.Decrypt(key, nonce, associated_data=aead)
-            msg3 = d.update(c2)
-            self.assertEqual(0, d.finalize(mac2))
-            self.assertEqual(msg, msg3)
+# todo remove
+#            e = monocypher.Encrypt(key, nonce, associated_data=aead)
+#            c2 = e.update(msg)
+#            mac2 = e.finalize()
+#            self.assertEqual(mac, mac2)
+#            self.assertEqual(c, c2)
+#
+#            d = monocypher.Decrypt(key, nonce, associated_data=aead)
+#            msg3 = d.update(c2)
+#            self.assertEqual(0, d.finalize(mac2))
+#            self.assertEqual(msg, msg3)
 
     def test_sign(self):
         random = np.random.RandomState(seed=1)

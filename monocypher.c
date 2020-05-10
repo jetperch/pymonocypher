@@ -1,28 +1,65 @@
-// Monocypher version 2.0.6
+// Monocypher version 3.1.0
+//
+// This file is dual-licensed.  Choose whichever licence you want from
+// the two licences listed below.
+//
+// The first licence is a regular 2-clause BSD licence.  The second licence
+// is the CC-0 from Creative Commons. It is intended to release Monocypher
+// to the public domain.  The BSD licence serves as a fallback option.
+//
+// SPDX-License-Identifier: BSD-2-Clause OR CC0-1.0
+//
+// ------------------------------------------------------------------------
+//
+// Copyright (c) 2017-2020, Loup Vaillant
+// All rights reserved.
+//
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the
+//    distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// ------------------------------------------------------------------------
+//
+// Written in 2017-2020 by Loup Vaillant
+//
+// To the extent possible under law, the author(s) have dedicated all copyright
+// and related neighboring rights to this software to the public domain
+// worldwide.  This software is distributed without any warranty.
+//
+// You should have received a copy of the CC0 Public Domain Dedication along
+// with this software.  If not, see
+// <https://creativecommons.org/publicdomain/zero/1.0/>
 
 #include "monocypher.h"
 
 /////////////////
 /// Utilities ///
 /////////////////
-
-// By default, EdDSA signatures use Blake2b.  SHA-512 is provided as an
-// option for full ed25519 compatibility. To use with SHA-512, compile
-// with option -DED25519_SHA512 and include "sha512.h".
-#ifdef ED25519_SHA512
-    #define HASH crypto_sha512
-#else
-    #define HASH crypto_blake2b
-#endif
-#define COMBINE1(x, y) x ## y
-#define COMBINE2(x, y) COMBINE1(x, y)
-#define HASH_CTX    COMBINE2(HASH, _ctx)
-#define HASH_INIT   COMBINE2(HASH, _init)
-#define HASH_UPDATE COMBINE2(HASH, _update)
-#define HASH_FINAL  COMBINE2(HASH, _final)
-
 #define FOR_T(type, i, start, end) for (type i = (start); i < (end); i++)
 #define FOR(i, start, end)         FOR_T(size_t, i, start, end)
+#define COPY(dst, src, size)       FOR(i, 0, size) (dst)[i] = (src)[i]
+#define ZERO(buf, size)            FOR(i, 0, size) (buf)[i] = 0
 #define WIPE_CTX(ctx)              crypto_wipe(ctx   , sizeof(*(ctx)))
 #define WIPE_BUFFER(buffer)        crypto_wipe(buffer, sizeof(buffer))
 #define MIN(a, b)                  ((a) <= (b) ? (a) : (b))
@@ -72,6 +109,19 @@ static void store64_le(u8 out[8], u64 in)
     store32_le(out + 4, in >> 32);
 }
 
+static void load32_le_buf (u32 *dst, const u8 *src, size_t size) {
+    FOR(i, 0, size) { dst[i] = load32_le(src + i*4); }
+}
+static void load64_le_buf (u64 *dst, const u8 *src, size_t size) {
+    FOR(i, 0, size) { dst[i] = load64_le(src + i*8); }
+}
+static void store32_le_buf(u8 *dst, const u32 *src, size_t size) {
+    FOR(i, 0, size) { store32_le(dst + i*4, src[i]); }
+}
+static void store64_le_buf(u8 *dst, const u64 *src, size_t size) {
+    FOR(i, 0, size) { store64_le(dst + i*8, src[i]); }
+}
+
 static u64 rotr64(u64 x, u64 n) { return (x >> n) ^ (x << (64 - n)); }
 static u32 rotl32(u32 x, u32 n) { return (x << n) ^ (x >> (32 - n)); }
 
@@ -101,9 +151,7 @@ static int zerocmp32(const u8 p[32])
 void crypto_wipe(void *secret, size_t size)
 {
     volatile u8 *v_secret = (u8*)secret;
-    FOR (i, 0, size) {
-        v_secret[i] = 0;
-    }
+    ZERO(v_secret, size);
 }
 
 /////////////////
@@ -139,148 +187,130 @@ static void chacha20_rounds(u32 out[16], const u32 in[16])
     out[12] = t12;  out[13] = t13;  out[14] = t14;  out[15] = t15;
 }
 
-static void chacha20_init_key(crypto_chacha_ctx *ctx, const u8 key[32])
+static void chacha20_init_key(u32 block[16], const u8 key[32])
 {
-    // constant
-    ctx->input[0] = load32_le((const u8*)"expa");
-    ctx->input[1] = load32_le((const u8*)"nd 3");
-    ctx->input[2] = load32_le((const u8*)"2-by");
-    ctx->input[3] = load32_le((const u8*)"te k");
-    // key
-    FOR (i, 0, 8) {
-        ctx->input[i+4] = load32_le(key + i*4);
-    }
+    load32_le_buf(block  , (const u8*)"expand 32-byte k", 4); // constant
+    load32_le_buf(block+4, key                          , 8); // key
 }
 
-static u8 chacha20_pool_byte(crypto_chacha_ctx *ctx)
+static u64 chacha20_core(u32 input[16], u8 *cipher_text, const u8 *plain_text,
+                         size_t text_size)
 {
-    u32 pool_word = ctx->pool[ctx->pool_idx >> 2];
-    u8  pool_byte = (u8)(pool_word >> (8*(ctx->pool_idx & 3)));
-    ctx->pool_idx++;
-    return pool_byte;
-}
-
-// Fill the pool if needed, update the counters
-static void chacha20_refill_pool(crypto_chacha_ctx *ctx)
-{
-    chacha20_rounds(ctx->pool, ctx->input);
-    FOR (j, 0, 16) {
-        ctx->pool[j] += ctx->input[j];
-    }
-    ctx->pool_idx = 0;
-    ctx->input[12]++;
-    if (ctx->input[12] == 0) {
-        ctx->input[13]++;
-    }
-}
-
-void crypto_chacha20_H(u8 out[32], const u8 key[32], const u8 in[16])
-{
-    crypto_chacha_ctx ctx;
-    chacha20_init_key(&ctx, key);
-    FOR (i, 0, 4) {
-        ctx.input[i+12] = load32_le(in + i*4);
-    }
-    u32 buffer[16];
-    chacha20_rounds(buffer, ctx.input);
-    // prevents reversal of the rounds by revealing only half of the buffer.
-    FOR (i, 0, 4) {
-        store32_le(out      + i*4, buffer[i     ]); // constant
-        store32_le(out + 16 + i*4, buffer[i + 12]); // counter and nonce
-    }
-    WIPE_CTX(&ctx);
-    WIPE_BUFFER(buffer);
-}
-
-static void chacha20_encrypt(crypto_chacha_ctx *ctx,
-                             u8                *cipher_text,
-                             const u8          *plain_text,
-                             size_t             text_size)
-{
-    FOR (i, 0, text_size) {
-        if (ctx->pool_idx == 64) {
-            chacha20_refill_pool(ctx);
-        }
-        u8 plain = 0;
-        if (plain_text != 0) {
-            plain = *plain_text;
-            plain_text++;
-        }
-        *cipher_text = chacha20_pool_byte(ctx) ^ plain;
-        cipher_text++;
-    }
-}
-
-void crypto_chacha20_init(crypto_chacha_ctx *ctx,
-                          const u8           key[32],
-                          const u8           nonce[8])
-{
-    chacha20_init_key      (ctx, key);     // key
-    crypto_chacha20_set_ctr(ctx, 0  );     // counter
-    ctx->input[14] = load32_le(nonce + 0); // nonce
-    ctx->input[15] = load32_le(nonce + 4); // nonce
-}
-
-void crypto_chacha20_x_init(crypto_chacha_ctx *ctx,
-                            const u8           key[32],
-                            const u8           nonce[24])
-{
-    u8 derived_key[32];
-    crypto_chacha20_H(derived_key, key, nonce);
-    crypto_chacha20_init(ctx, derived_key, nonce + 16);
-    WIPE_BUFFER(derived_key);
-}
-
-void crypto_chacha20_set_ctr(crypto_chacha_ctx *ctx, u64 ctr)
-{
-    ctx->input[12] = ctr & 0xffffffff;
-    ctx->input[13] = ctr >> 32;
-    ctx->pool_idx  = 64;  // The random pool (re)starts empty
-}
-
-void crypto_chacha20_encrypt(crypto_chacha_ctx *ctx,
-                             u8                *cipher_text,
-                             const u8          *plain_text,
-                             size_t             text_size)
-{
-    // Align ourselves with block boundaries
-    size_t align = MIN(ALIGN(ctx->pool_idx, 64), text_size);
-    chacha20_encrypt(ctx, cipher_text, plain_text, align);
-    if (plain_text != 0) {
-        plain_text += align;
-    }
-    cipher_text += align;
-    text_size   -= align;
-
-    // Process the message block by block
-    FOR (i, 0, text_size >> 6) {  // number of blocks
-        chacha20_refill_pool(ctx);
+    // Whole blocks
+    u32    pool[16];
+    size_t nb_blocks = text_size >> 6;
+    FOR (i, 0, nb_blocks) {
+        chacha20_rounds(pool, input);
         if (plain_text != 0) {
             FOR (j, 0, 16) {
-                u32 plain = load32_le(plain_text);
-                store32_le(cipher_text, ctx->pool[j] ^ plain);
-                plain_text  += 4;
+                u32 p = pool[j] + input[j];
+                store32_le(cipher_text, p ^ load32_le(plain_text));
                 cipher_text += 4;
+                plain_text  += 4;
             }
         } else {
             FOR (j, 0, 16) {
-                store32_le(cipher_text, ctx->pool[j]);
+                u32 p = pool[j] + input[j];
+                store32_le(cipher_text, p);
                 cipher_text += 4;
             }
         }
-        ctx->pool_idx = 64;
+        input[12]++;
+        if (input[12] == 0) {
+            input[13]++;
+        }
     }
     text_size &= 63;
 
-    // remaining bytes
-    chacha20_encrypt(ctx, cipher_text, plain_text, text_size);
+    // Last (incomplete) block
+    if (text_size > 0) {
+        if (plain_text == 0) {
+            plain_text = zero;
+        }
+        chacha20_rounds(pool, input);
+        u8 tmp[64];
+        FOR (i, 0, 16) {
+            store32_le(tmp + i*4, pool[i] + input[i]);
+        }
+        FOR (i, 0, text_size) {
+            cipher_text[i] = tmp[i] ^ plain_text[i];
+        }
+        WIPE_BUFFER(tmp);
+    }
+    WIPE_BUFFER(pool);
+    return input[12] + ((u64)input[13] << 32) + (text_size > 0);
 }
 
-void crypto_chacha20_stream(crypto_chacha_ctx *ctx, u8 *stream, size_t size)
+void crypto_hchacha20(u8 out[32], const u8 key[32], const u8 in [16])
 {
-    crypto_chacha20_encrypt(ctx, stream, 0, size);
+    u32 block[16];
+    chacha20_init_key(block, key);
+    // input
+    load32_le_buf(block + 12, in, 4);
+    chacha20_rounds(block, block);
+    // prevent reversal of the rounds by revealing only half of the buffer.
+    store32_le_buf(out   , block   , 4); // constant
+    store32_le_buf(out+16, block+12, 4); // counter and nonce
+    WIPE_BUFFER(block);
 }
 
+u64 crypto_chacha20_ctr(u8 *cipher_text, const u8 *plain_text,
+                        size_t text_size, const u8 key[32], const u8 nonce[8],
+                        u64 ctr)
+{
+    u32 input[16];
+    chacha20_init_key(input, key);
+    input[12] = (u32) ctr;
+    input[13] = (u32)(ctr >> 32);
+    load32_le_buf(input+14, nonce, 2);
+    ctr = chacha20_core(input, cipher_text, plain_text, text_size);
+    WIPE_BUFFER(input);
+    return ctr;
+}
+
+u32 crypto_ietf_chacha20_ctr(u8 *cipher_text, const u8 *plain_text,
+                             size_t text_size,
+                             const u8 key[32], const u8 nonce[12], u32 ctr)
+{
+    u32 input[16];
+    chacha20_init_key(input, key);
+    input[12] = (u32) ctr;
+    load32_le_buf(input+13, nonce, 3);
+    ctr = (u32)chacha20_core(input, cipher_text, plain_text, text_size);
+    WIPE_BUFFER(input);
+    return ctr;
+}
+
+u64 crypto_xchacha20_ctr(u8 *cipher_text, const u8 *plain_text,
+                         size_t text_size,
+                         const u8 key[32], const u8 nonce[24], u64 ctr)
+{
+    u8 sub_key[32];
+    crypto_hchacha20(sub_key, key, nonce);
+    ctr = crypto_chacha20_ctr(cipher_text, plain_text, text_size,
+                              sub_key, nonce+16, ctr);
+    WIPE_BUFFER(sub_key);
+    return ctr;
+}
+
+void crypto_chacha20(u8 *cipher_text, const u8 *plain_text, size_t text_size,
+                     const u8 key[32], const u8 nonce[8])
+{
+    crypto_chacha20_ctr(cipher_text, plain_text, text_size, key, nonce, 0);
+
+}
+void crypto_ietf_chacha20(u8 *cipher_text, const u8 *plain_text,
+                          size_t text_size,
+                          const u8 key[32], const u8 nonce[12])
+{
+    crypto_ietf_chacha20_ctr(cipher_text, plain_text, text_size, key, nonce, 0);
+}
+
+void crypto_xchacha20(u8 *cipher_text, const u8 *plain_text, size_t text_size,
+                      const u8 key[32], const u8 nonce[24])
+{
+    crypto_xchacha20_ctr(cipher_text, plain_text, text_size, key, nonce, 0);
+}
 
 /////////////////
 /// Poly 1305 ///
@@ -313,11 +343,11 @@ static void poly_block(crypto_poly1305_ctx *ctx)
     const u32 rr3 = (r3 >> 2) + r3; // rr3 <= 13fffffb // rr1 == (r3 >> 2) * 5
 
     // (h + c) * r, without carry propagation
-    const u64 x0 = s0*r0 + s1*rr3 + s2*rr2 + s3*rr1 +s4*rr0;//<=97ffffe007fffff8
-    const u64 x1 = s0*r1 + s1*r0  + s2*rr3 + s3*rr2 +s4*rr1;//<=8fffffe20ffffff6
-    const u64 x2 = s0*r2 + s1*r1  + s2*r0  + s3*rr3 +s4*rr2;//<=87ffffe417fffff4
-    const u64 x3 = s0*r3 + s1*r2  + s2*r1  + s3*r0  +s4*rr3;//<=7fffffe61ffffff2
-    const u32 x4 = s4 * (r0 & 3); // ...recover 2 bits      //<=               f
+    const u64 x0 = s0*r0+ s1*rr3+ s2*rr2+ s3*rr1+ s4*rr0; // <= 97ffffe007fffff8
+    const u64 x1 = s0*r1+ s1*r0 + s2*rr3+ s3*rr2+ s4*rr1; // <= 8fffffe20ffffff6
+    const u64 x2 = s0*r2+ s1*r1 + s2*r0 + s3*rr3+ s4*rr2; // <= 87ffffe417fffff4
+    const u64 x3 = s0*r3+ s1*r2 + s2*r1 + s3*r0 + s4*rr3; // <= 7fffffe61ffffff2
+    const u32 x4 = s4 * (r0 & 3); // ...recover 2 bits    // <=                f
 
     // partial reduction modulo 2^130 - 5
     const u32 u5 = x4 + (x3 >> 32); // u5 <= 7ffffff5
@@ -338,10 +368,7 @@ static void poly_block(crypto_poly1305_ctx *ctx)
 // (re-)initialises the input counter and input buffer
 static void poly_clear_c(crypto_poly1305_ctx *ctx)
 {
-    ctx->c[0]  = 0;
-    ctx->c[1]  = 0;
-    ctx->c[2]  = 0;
-    ctx->c[3]  = 0;
+    ZERO(ctx->c, 4);
     ctx->c_idx = 0;
 }
 
@@ -368,16 +395,15 @@ static void poly_update(crypto_poly1305_ctx *ctx,
 void crypto_poly1305_init(crypto_poly1305_ctx *ctx, const u8 key[32])
 {
     // Initial hash is zero
-    FOR (i, 0, 5) {
-        ctx->h[i] = 0;
-    }
+    ZERO(ctx->h, 5);
     // add 2^130 to every input block
     ctx->c[4] = 1;
     poly_clear_c(ctx);
     // load r and pad (r has some of its bits cleared)
-    FOR (i, 0, 1) { ctx->r  [0] = load32_le(key           ) & 0x0fffffff; }
-    FOR (i, 1, 4) { ctx->r  [i] = load32_le(key + i*4     ) & 0x0ffffffc; }
-    FOR (i, 0, 4) { ctx->pad[i] = load32_le(key + i*4 + 16);              }
+    load32_le_buf(ctx->r  , key   , 4);
+    load32_le_buf(ctx->pad, key+16, 4);
+    FOR (i, 0, 1) { ctx->r[i] &= 0x0fffffff; }
+    FOR (i, 1, 4) { ctx->r[i] &= 0x0ffffffc; }
 }
 
 void crypto_poly1305_update(crypto_poly1305_ctx *ctx,
@@ -392,9 +418,7 @@ void crypto_poly1305_update(crypto_poly1305_ctx *ctx,
     // Process the message block by block
     size_t nb_blocks = message_size >> 4;
     FOR (i, 0, nb_blocks) {
-        FOR (j, 0, 4) {
-            ctx->c[j] = load32_le(message +  j*4);
-        }
+        load32_le_buf(ctx->c, message, 4);
         poly_block(ctx);
         message += 16;
     }
@@ -527,22 +551,16 @@ static void blake2b_compress(crypto_blake2b_ctx *ctx, int is_last_block)
 #endif
 
     // update hash
-    ctx->hash[0] ^= v0 ^ v8;
-    ctx->hash[1] ^= v1 ^ v9;
-    ctx->hash[2] ^= v2 ^ v10;
-    ctx->hash[3] ^= v3 ^ v11;
-    ctx->hash[4] ^= v4 ^ v12;
-    ctx->hash[5] ^= v5 ^ v13;
-    ctx->hash[6] ^= v6 ^ v14;
-    ctx->hash[7] ^= v7 ^ v15;
+    ctx->hash[0] ^= v0 ^ v8;   ctx->hash[1] ^= v1 ^ v9;
+    ctx->hash[2] ^= v2 ^ v10;  ctx->hash[3] ^= v3 ^ v11;
+    ctx->hash[4] ^= v4 ^ v12;  ctx->hash[5] ^= v5 ^ v13;
+    ctx->hash[6] ^= v6 ^ v14;  ctx->hash[7] ^= v7 ^ v15;
 }
 
 static void blake2b_set_input(crypto_blake2b_ctx *ctx, u8 input, size_t index)
 {
     if (index == 0) {
-        FOR (i, 0, 16) {
-            ctx->input[i] = 0;
-        }
+        ZERO(ctx->input, 16);
     }
     size_t word = index >> 3;
     size_t byte = index & 7;
@@ -573,9 +591,7 @@ void crypto_blake2b_general_init(crypto_blake2b_ctx *ctx, size_t hash_size,
                                  const u8           *key, size_t key_size)
 {
     // initial hash
-    FOR (i, 0, 8) {
-        ctx->hash[i] = iv[i];
-    }
+    COPY(ctx->hash, iv, 8);
     ctx->hash[0] ^= 0x01010000 ^ (key_size << 8) ^ hash_size;
 
     ctx->input_offset[0] = 0;         // beginning of the input, no offset
@@ -607,9 +623,7 @@ void crypto_blake2b_update(crypto_blake2b_ctx *ctx,
     // Process the message block by block
     FOR (i, 0, message_size >> 7) { // number of blocks
         blake2b_end_block(ctx);
-        FOR (j, 0, 16) {
-            ctx->input[j] = load64_le(message + j*8);
-        }
+        load64_le_buf(ctx->input, message, 16);
         message += 128;
         ctx->input_idx = 128;
     }
@@ -628,9 +642,7 @@ void crypto_blake2b_final(crypto_blake2b_ctx *ctx, u8 *hash)
     blake2b_incr(ctx);        // update the input offset
     blake2b_compress(ctx, 1); // compress the last block
     size_t nb_words = ctx->hash_size >> 3;
-    FOR (i, 0, nb_words) {
-        store64_le(hash + i*8, ctx->hash[i]);
-    }
+    store64_le_buf(hash, ctx->hash, nb_words);
     FOR (i, nb_words << 3, ctx->hash_size) {
         hash[i] = (ctx->hash[i >> 3] >> (8 * (i & 7))) & 0xff;
     }
@@ -652,6 +664,28 @@ void crypto_blake2b(u8 hash[64], const u8 *message, size_t message_size)
     crypto_blake2b_general(hash, 64, 0, 0, message, message_size);
 }
 
+static void blake2b_vtable_init(void *ctx)
+{
+    crypto_blake2b_init(&((crypto_sign_ctx*)ctx)->hash);
+}
+
+static void blake2b_vtable_update(void *ctx, const u8 *m, size_t s)
+{
+    crypto_blake2b_update(&((crypto_sign_ctx*)ctx)->hash, m, s);
+}
+
+static void blake2b_vtable_final(void *ctx, u8 *h)
+{
+    crypto_blake2b_final(&((crypto_sign_ctx*)ctx)->hash, h);
+}
+
+const crypto_sign_vtable crypto_blake2b_vtable = {
+    crypto_blake2b,
+    blake2b_vtable_init,
+    blake2b_vtable_update,
+    blake2b_vtable_final,
+    sizeof(crypto_sign_ctx),
+};
 
 ////////////////
 /// Argon2 i ///
@@ -664,9 +698,7 @@ typedef struct { u64 a[128]; } block;
 static void wipe_block(block *b)
 {
     volatile u64* a = b->a;
-    FOR (i, 0, 128) {
-        a[i] = 0;
-    }
+    ZERO(a, 128);
 }
 
 // updates a Blake2 hash with a 32 bit word, little endian.
@@ -680,16 +712,12 @@ static void blake_update_32(crypto_blake2b_ctx *ctx, u32 input)
 
 static void load_block(block *b, const u8 bytes[1024])
 {
-    FOR (i, 0, 128) {
-        b->a[i] = load64_le(bytes + i*8);
-    }
+    load64_le_buf(b->a, bytes, 128);
 }
 
 static void store_block(u8 bytes[1024], const block *b)
 {
-    FOR (i, 0, 128) {
-        store64_le(bytes + i*8, b->a[i]);
-    }
+    store64_le_buf(bytes, b->a, 128);
 }
 
 static void copy_block(block *o,const block*in){FOR(i,0,128)o->a[i] = in->a[i];}
@@ -792,14 +820,12 @@ static void g_xor(block *result, const block *x, const block *y, block *tmp)
 // Unary version of the compression function.
 // The missing argument is implied zero.
 // Does the transformation in place.
-static void unary_g(block *work_block)
+static void unary_g(block *work_block, block *tmp)
 {
     // work_block == R
-    block tmp;
-    copy_block(&tmp, work_block); // tmp        = R
-    g_rounds(work_block);         // work_block = Z
-    xor_block(work_block, &tmp);  // work_block = Z ^ R
-    wipe_block(&tmp);
+    copy_block(tmp, work_block); // tmp        = R
+    g_rounds  (work_block);      // work_block = Z
+    xor_block (work_block, tmp); // work_block = Z ^ R
 }
 
 // Argon2i uses a kind of stream cipher to determine which reference
@@ -830,12 +856,14 @@ static void gidx_refresh(gidx_ctx *ctx)
     ctx->b.a[4] = ctx->nb_iterations;
     ctx->b.a[5] = 1;  // type: Argon2i
     ctx->b.a[6] = ctx->ctr;
-    FOR (i, 7, 128) { ctx->b.a[i] = 0; } // ...then zero the rest out
+    ZERO(ctx->b.a + 7, 121); // ...then zero the rest out
 
     // Shuffle the block thus: ctx->b = G((G(ctx->b, zero)), zero)
     // (G "square" function), to get cheap pseudo-random numbers.
-    unary_g(&ctx->b);
-    unary_g(&ctx->b);
+    block tmp;
+    unary_g(&ctx->b, &tmp);
+    unary_g(&ctx->b, &tmp);
+    wipe_block(&tmp);
 }
 
 static void gidx_init(gidx_ctx *ctx,
@@ -889,11 +917,12 @@ static u32 gidx_next(gidx_ctx *ctx)
     u32 start_pos  = first_pass ? 0 : next_slice;
 
     // Generate offset from J1 (no need for J2, there's only one lane)
-    u64 j1         = ctx->b.a[index] & 0xffffffff; // pseudo-random number
-    u64 x          = (j1 * j1)       >> 32;
-    u64 y          = (area_size * x) >> 32;
-    u64 z          = (area_size - 1) - y;
-    return (start_pos + z) % ctx->nb_blocks;
+    u64 j1  = ctx->b.a[index] & 0xffffffff; // pseudo-random number
+    u64 x   = (j1 * j1)       >> 32;
+    u64 y   = (area_size * x) >> 32;
+    u64 z   = (area_size - 1) - y;
+    u64 ref = start_pos + z;                // ref < 2 * nb_blocks
+    return ref < ctx->nb_blocks ? ref : ref - ctx->nb_blocks;
 }
 
 // Main algorithm
@@ -954,7 +983,7 @@ void crypto_argon2i_general(u8       *hash,      u32 hash_size,
 
     // fill (then re-fill) the rest of the blocks
     block tmp;
-    gidx_ctx ctx;
+    gidx_ctx ctx; // public information, no need to wipe
     FOR_T (u32, pass_number, 0, nb_iterations) {
         int first_pass = pass_number == 0;
 
@@ -980,7 +1009,6 @@ void crypto_argon2i_general(u8       *hash,      u32 hash_size,
             }
         }
     }
-    wipe_block(&ctx.b);
     wipe_block(&tmp);
     // hash the very last block with H' into the output hash
     u8 final_block[1024];
@@ -990,25 +1018,17 @@ void crypto_argon2i_general(u8       *hash,      u32 hash_size,
 
     // wipe work area
     volatile u64 *p = (u64*)work_area;
-    FOR (i, 0, 128 * nb_blocks) {
-        p[i] = 0;
-    }
+    ZERO(p, 128 * nb_blocks);
 }
 
-void crypto_argon2i(u8       *hash,      u32 hash_size,
-                    void     *work_area, u32 nb_blocks,
-                    u32 nb_iterations,
+void crypto_argon2i(u8   *hash,      u32 hash_size,
+                    void *work_area, u32 nb_blocks, u32 nb_iterations,
                     const u8 *password,  u32 password_size,
                     const u8 *salt,      u32 salt_size)
 {
-    crypto_argon2i_general(hash, hash_size,
-                           work_area, nb_blocks, nb_iterations,
-                           password, password_size,
-                           salt    , salt_size,
-                           0, 0, 0, 0);
+    crypto_argon2i_general(hash, hash_size, work_area, nb_blocks, nb_iterations,
+                           password, password_size, salt , salt_size, 0,0,0,0);
 }
-
-
 
 ////////////////////////////////////
 /// Arithmetic modulo 2^255 - 19 ///
@@ -1019,8 +1039,8 @@ void crypto_argon2i(u8       *hash,      u32 hash_size,
 // field element
 typedef i32 fe[10];
 
-static void fe_0(fe h) {            FOR(i, 0, 10) h[i] = 0; }
-static void fe_1(fe h) { h[0] = 1;  FOR(i, 1, 10) h[i] = 0; }
+static void fe_0(fe h) {           ZERO(h  , 10); }
+static void fe_1(fe h) { h[0] = 1; ZERO(h+1,  9); }
 
 static void fe_copy(fe h,const fe f           ){FOR(i,0,10) h[i] =  f[i];      }
 static void fe_neg (fe h,const fe f           ){FOR(i,0,10) h[i] = -f[i];      }
@@ -1029,7 +1049,7 @@ static void fe_sub (fe h,const fe f,const fe g){FOR(i,0,10) h[i] = f[i] - g[i];}
 
 static void fe_cswap(fe f, fe g, int b)
 {
-    i32 mask = -b; // rely on 2's complement: -1 = 0xffffffff
+    i32 mask = -b; // -1 = 0xffffffff
     FOR (i, 0, 10) {
         i32 x = (f[i] ^ g[i]) & mask;
         f[i] = f[i] ^ x;
@@ -1039,7 +1059,7 @@ static void fe_cswap(fe f, fe g, int b)
 
 static void fe_ccopy(fe f, const fe g, int b)
 {
-    i32 mask = -b; // rely on 2's complement: -1 = 0xffffffff
+    i32 mask = -b; // -1 = 0xffffffff
     FOR (i, 0, 10) {
         i32 x = (f[i] ^ g[i]) & mask;
         f[i] = f[i] ^ x;
@@ -1076,6 +1096,7 @@ static void fe_frombytes(fe h, const u8 s[32])
     FE_CARRY;
 }
 
+// multiply a field element by a signed 32-bit integer
 static void fe_mul_small(fe h, const fe f, i32 g)
 {
     i64 t0 = f[0] * (i64) g;  i64 t1 = f[1] * (i64) g;
@@ -1175,34 +1196,11 @@ static void fe_sq(fe h, const fe f)
     CARRY;
 }
 
+// h = 2 * (f^2)
 static void fe_sq2(fe h, const fe f)
 {
     fe_sq(h, f);
     fe_mul_small(h, h, 2);
-}
-
-// This could be simplified, but it would be slower
-static void fe_invert(fe out, const fe z)
-{
-    fe t0, t1, t2, t3;
-    fe_sq(t0, z );
-    fe_sq(t1, t0);
-    fe_sq(t1, t1);
-    fe_mul(t1,  z, t1);
-    fe_mul(t0, t0, t1);
-    fe_sq(t2, t0);                                fe_mul(t1 , t1, t2);
-    fe_sq(t2, t1); FOR (i, 1,   5) fe_sq(t2, t2); fe_mul(t1 , t2, t1);
-    fe_sq(t2, t1); FOR (i, 1,  10) fe_sq(t2, t2); fe_mul(t2 , t2, t1);
-    fe_sq(t3, t2); FOR (i, 1,  20) fe_sq(t3, t3); fe_mul(t2 , t3, t2);
-    fe_sq(t2, t2); FOR (i, 1,  10) fe_sq(t2, t2); fe_mul(t1 , t2, t1);
-    fe_sq(t2, t1); FOR (i, 1,  50) fe_sq(t2, t2); fe_mul(t2 , t2, t1);
-    fe_sq(t3, t2); FOR (i, 1, 100) fe_sq(t3, t3); fe_mul(t2 , t3, t2);
-    fe_sq(t2, t2); FOR (i, 1,  50) fe_sq(t2, t2); fe_mul(t1 , t2, t1);
-    fe_sq(t1, t1); FOR (i, 1,   5) fe_sq(t1, t1); fe_mul(out, t1, t0);
-    WIPE_BUFFER(t0);
-    WIPE_BUFFER(t1);
-    WIPE_BUFFER(t2);
-    WIPE_BUFFER(t3);
 }
 
 // This could be simplified, but it would be slower
@@ -1226,29 +1224,35 @@ static void fe_pow22523(fe out, const fe z)
     WIPE_BUFFER(t2);
 }
 
+// Inverting means multiplying by 2^255 - 21
+// 2^255 - 21 = (2^252 - 3) * 8 + 3
+// So we reuse the multiplication chain of fe_pow22523
+static void fe_invert(fe out, const fe z)
+{
+    fe tmp;
+    fe_pow22523(tmp, z);
+    // tmp2^8 * z^3
+    fe_sq(tmp, tmp);                        // 0
+    fe_sq(tmp, tmp);  fe_mul(tmp, tmp, z);  // 1
+    fe_sq(tmp, tmp);  fe_mul(out, tmp, z);  // 1
+    WIPE_BUFFER(tmp);
+}
+
 static void fe_tobytes(u8 s[32], const fe h)
 {
     i32 t[10];
-    FOR (i, 0, 10) {
-        t[i] = h[i];
-    }
+    COPY(t, h, 10);
     i32 q = (19 * t[9] + (((i32) 1) << 24)) >> 25;
     FOR (i, 0, 5) {
         q += t[2*i  ]; q >>= 26;
         q += t[2*i+1]; q >>= 25;
     }
     t[0] += 19 * q;
-
-    i32 c0 = t[0] >> 26; t[1] += c0; t[0] -= c0 * (1 << 26);
-    i32 c1 = t[1] >> 25; t[2] += c1; t[1] -= c1 * (1 << 25);
-    i32 c2 = t[2] >> 26; t[3] += c2; t[2] -= c2 * (1 << 26);
-    i32 c3 = t[3] >> 25; t[4] += c3; t[3] -= c3 * (1 << 25);
-    i32 c4 = t[4] >> 26; t[5] += c4; t[4] -= c4 * (1 << 26);
-    i32 c5 = t[5] >> 25; t[6] += c5; t[5] -= c5 * (1 << 25);
-    i32 c6 = t[6] >> 26; t[7] += c6; t[6] -= c6 * (1 << 26);
-    i32 c7 = t[7] >> 25; t[8] += c7; t[7] -= c7 * (1 << 25);
-    i32 c8 = t[8] >> 26; t[9] += c8; t[8] -= c8 * (1 << 26);
-    i32 c9 = t[9] >> 25;             t[9] -= c9 * (1 << 25);
+    q = 0;
+    FOR (i, 0, 5) {
+        t[i*2  ] += q;  q = t[i*2  ] >> 26;  t[i*2  ] -= q * (1 << 26);
+        t[i*2+1] += q;  q = t[i*2+1] >> 25;  t[i*2+1] -= q * (1 << 25);
+    }
 
     store32_le(s +  0, ((u32)t[0] >>  0) | ((u32)t[1] << 26));
     store32_le(s +  4, ((u32)t[1] >>  6) | ((u32)t[2] << 19));
@@ -1263,32 +1267,124 @@ static void fe_tobytes(u8 s[32], const fe h)
 }
 
 //  Parity check.  Returns 0 if even, 1 if odd
-static int fe_isnegative(const fe f)
+static int fe_isodd(const fe f)
 {
     u8 s[32];
     fe_tobytes(s, f);
-    u8 isneg = s[0] & 1;
+    u8 isodd = s[0] & 1;
     WIPE_BUFFER(s);
-    return isneg;
+    return isodd;
 }
 
+// Returns 0 if zero, 1 if non zero
 static int fe_isnonzero(const fe f)
 {
     u8 s[32];
     fe_tobytes(s, f);
     int isnonzero = zerocmp32(s);
     WIPE_BUFFER(s);
-    return isnonzero;
+    return -isnonzero;
 }
 
-static void trim_scalar(u8 s[32])
+// Returns 1 if equal, 0 if not equal
+static int fe_isequal(const fe f, const fe g)
 {
-    s[ 0] &= 248;
-    s[31] &= 127;
-    s[31] |= 64;
+    fe diff;
+    fe_sub(diff, f, g);
+    int isdifferent = fe_isnonzero(diff);
+    WIPE_BUFFER(diff);
+    return 1 - isdifferent;
 }
 
-static int scalar_bit(const u8 s[32], int i) {
+static const fe sqrtm1 = { -32595792, -7943725, 9377950, 3500415, 12389472,
+                           -272473, -25146209, -2005654, 326686, 11406482,};
+
+// Inverse square root.
+// Returns true if x is a non zero square, false otherwise.
+// After the call:
+//   isr = sqrt(1/x)        if x is non-zero square.
+//   isr = sqrt(sqrt(-1)/x) if x is not a square.
+//   isr = 0                if x is zero.
+// We do not guarantee the sign of the square root.
+//
+// Notes:
+// Let quartic = x^((p-1)/4)
+//
+// x^((p-1)/2) = chi(x)
+// quartic^2   = chi(x)
+// quartic     = sqrt(chi(x))
+// quartic     = 1 or -1 or sqrt(-1) or -sqrt(-1)
+//
+// Note that x is a square if quartic is 1 or -1
+// There are 4 cases to consider:
+//
+// if   quartic         = 1  (x is a square)
+// then x^((p-1)/4)     = 1
+//      x^((p-5)/4) * x = 1
+//      x^((p-5)/4)     = 1/x
+//      x^((p-5)/8)     = sqrt(1/x) or -sqrt(1/x)
+//
+// if   quartic                = -1  (x is a square)
+// then x^((p-1)/4)            = -1
+//      x^((p-5)/4) * x        = -1
+//      x^((p-5)/4)            = -1/x
+//      x^((p-5)/8)            = sqrt(-1)   / sqrt(x)
+//      x^((p-5)/8) * sqrt(-1) = sqrt(-1)^2 / sqrt(x)
+//      x^((p-5)/8) * sqrt(-1) = -1/sqrt(x)
+//      x^((p-5)/8) * sqrt(-1) = -sqrt(1/x) or sqrt(1/x)
+//
+// if   quartic         = sqrt(-1)  (x is not a square)
+// then x^((p-1)/4)     = sqrt(-1)
+//      x^((p-5)/4) * x = sqrt(-1)
+//      x^((p-5)/4)     = sqrt(-1)/x
+//      x^((p-5)/8)     = sqrt(sqrt(-1)/x) or -sqrt(sqrt(-1)/x)
+//
+// Note that the product of two non-squares is always a square:
+//   For any non-squares a and b, chi(a) = -1 and chi(b) = -1.
+//   Since chi(x) = x^((p-1)/2), chi(a)*chi(b) = chi(a*b) = 1.
+//   Therefore a*b is a square.
+//
+//   Since sqrt(-1) and x are both non-squares, their product is a
+//   square, and we can compute their square root.
+//
+// if   quartic                = -sqrt(-1)  (x is not a square)
+// then x^((p-1)/4)            = -sqrt(-1)
+//      x^((p-5)/4) * x        = -sqrt(-1)
+//      x^((p-5)/4)            = -sqrt(-1)/x
+//      x^((p-5)/8)            = sqrt(-sqrt(-1)/x)
+//      x^((p-5)/8)            = sqrt( sqrt(-1)/x) * sqrt(-1)
+//      x^((p-5)/8) * sqrt(-1) = sqrt( sqrt(-1)/x) * sqrt(-1)^2
+//      x^((p-5)/8) * sqrt(-1) = sqrt( sqrt(-1)/x) * -1
+//      x^((p-5)/8) * sqrt(-1) = -sqrt(sqrt(-1)/x) or sqrt(sqrt(-1)/x)
+static int invsqrt(fe isr, const fe x)
+{
+    fe check, quartic;
+    fe_copy(check, x);
+    fe_pow22523(isr, check);
+    fe_sq (quartic, isr);
+    fe_mul(quartic, quartic, check);
+    fe_1  (check);          int p1 = fe_isequal(quartic, check);
+    fe_neg(check, check );  int m1 = fe_isequal(quartic, check);
+    fe_neg(check, sqrtm1);  int ms = fe_isequal(quartic, check);
+    fe_mul(check, isr, sqrtm1);
+    fe_ccopy(isr, check, m1 | ms);
+    WIPE_BUFFER(quartic);
+    WIPE_BUFFER(check);
+    return p1 | m1;
+}
+
+// trim a scalar for scalar multiplication
+static void trim_scalar(u8 trimmed[32], const u8 scalar[32])
+{
+    COPY(trimmed, scalar, 32);
+    trimmed[ 0] &= 248;
+    trimmed[31] &= 127;
+    trimmed[31] |= 64;
+}
+
+// get bit from scalar at position i
+static int scalar_bit(const u8 s[32], int i)
+{
     if (i < 0) { return 0; } // handle -1 for sliding windows
     return (s[i>>3] >> (i&7)) & 1;
 }
@@ -1296,21 +1392,12 @@ static int scalar_bit(const u8 s[32], int i) {
 ///////////////
 /// X-25519 /// Taken from SUPERCOP's ref10 implementation.
 ///////////////
-
-int crypto_x25519(u8       raw_shared_secret[32],
-                  const u8 your_secret_key  [32],
-                  const u8 their_public_key [32])
+static void scalarmult(u8 q[32], const u8 scalar[32], const u8 p[32],
+                       size_t nb_bits)
 {
     // computes the scalar product
     fe x1;
-    fe_frombytes(x1, their_public_key);
-
-    // restrict the possible scalar values
-    u8 e[32];
-    FOR (i, 0, 32) {
-        e[i] = your_secret_key[i];
-    }
-    trim_scalar(e);
+    fe_frombytes(x1, p);
 
     // computes the actual scalar product (the result is in x2 and z2)
     fe x2, z2, x3, z3, t0, t1;
@@ -1320,9 +1407,9 @@ int crypto_x25519(u8       raw_shared_secret[32],
     fe_1(x2);        fe_0(z2); // "zero" point
     fe_copy(x3, x1); fe_1(z3); // "one"  point
     int swap = 0;
-    for (int pos = 254; pos >= 0; --pos) {
+    for (int pos = nb_bits-1; pos >= 0; --pos) {
         // constant time conditional swap before ladder step
-        int b = scalar_bit(e, pos);
+        int b = scalar_bit(scalar, pos);
         swap ^= b; // xor trick avoids swapping at the end of the loop
         fe_cswap(x2, x3, swap);
         fe_cswap(z2, z3, swap);
@@ -1330,12 +1417,24 @@ int crypto_x25519(u8       raw_shared_secret[32],
 
         // Montgomery ladder step: replaces (P2, P3) by (P2*2, P2+P3)
         // with differential addition
-        fe_sub(t0, x3, z3);  fe_sub(t1, x2, z2);    fe_add(x2, x2, z2);
-        fe_add(z2, x3, z3);  fe_mul(z3, t0, x2);    fe_mul(z2, z2, t1);
-        fe_sq (t0, t1    );  fe_sq (t1, x2    );    fe_add(x3, z3, z2);
-        fe_sub(z2, z3, z2);  fe_mul(x2, t1, t0);    fe_sub(t1, t1, t0);
-        fe_sq (z2, z2    );  fe_mul121666(z3, t1);  fe_sq (x3, x3    );
-        fe_add(t0, t0, z3);  fe_mul(z3, x1, z2);    fe_mul(z2, t1, t0);
+        fe_sub(t0, x3, z3);
+        fe_sub(t1, x2, z2);
+        fe_add(x2, x2, z2);
+        fe_add(z2, x3, z3);
+        fe_mul(z3, t0, x2);
+        fe_mul(z2, z2, t1);
+        fe_sq (t0, t1    );
+        fe_sq (t1, x2    );
+        fe_add(x3, z3, z2);
+        fe_sub(z2, z3, z2);
+        fe_mul(x2, t1, t0);
+        fe_sub(t1, t1, t0);
+        fe_sq (z2, z2    );
+        fe_mul121666(z3, t1);
+        fe_sq (x3, x3    );
+        fe_add(t0, t0, z3);
+        fe_mul(z3, x1, z2);
+        fe_mul(z2, t1, t0);
     }
     // last swap is necessary to compensate for the xor trick
     // Note: after this swap, P3 == P2 + P1.
@@ -1345,16 +1444,22 @@ int crypto_x25519(u8       raw_shared_secret[32],
     // normalises the coordinates: x == X / Z
     fe_invert(z2, z2);
     fe_mul(x2, x2, z2);
-    fe_tobytes(raw_shared_secret, x2);
+    fe_tobytes(q, x2);
 
-    WIPE_BUFFER(x1);  WIPE_BUFFER(e );
-    WIPE_BUFFER(x2);  WIPE_BUFFER(z2);
-    WIPE_BUFFER(x3);  WIPE_BUFFER(z3);
-    WIPE_BUFFER(t0);  WIPE_BUFFER(t1);
+    WIPE_BUFFER(x1);
+    WIPE_BUFFER(x2);  WIPE_BUFFER(z2);  WIPE_BUFFER(t0);
+    WIPE_BUFFER(x3);  WIPE_BUFFER(z3);  WIPE_BUFFER(t1);
+}
 
-    // Returns -1 if the output is all zero
-    // (happens with some malicious public keys)
-    return -1 - zerocmp32(raw_shared_secret);
+void crypto_x25519(u8       raw_shared_secret[32],
+                   const u8 your_secret_key  [32],
+                   const u8 their_public_key [32])
+{
+    // restrict the possible scalar values
+    u8 e[32];
+    trim_scalar(e, your_secret_key);
+    scalarmult(raw_shared_secret, e, their_public_key, 255);
+    WIPE_BUFFER(e);
 }
 
 void crypto_x25519_public_key(u8       public_key[32],
@@ -1364,15 +1469,15 @@ void crypto_x25519_public_key(u8       public_key[32],
     crypto_x25519(public_key, secret_key, base_point);
 }
 
-///////////////
-/// Ed25519 ///
-///////////////
+///////////////////////////
+/// Arithmetic modulo L ///
+///////////////////////////
+static const  u8 L[32] = {
+    0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2,
+    0xde, 0xf9, 0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, };
 
-static const  i64 L[32] = { 0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-                            0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10};
-
+// r = x mod L (little-endian)
 static void modL(u8 *r, i64 x[64])
 {
     for (unsigned i = 63; i >= 32; i--) {
@@ -1400,14 +1505,11 @@ static void modL(u8 *r, i64 x[64])
     }
 }
 
-// Reduces a hash modulo L (little endian)
+// Reduces a 64-byte hash modulo L (little endian)
 static void reduce(u8 r[64])
 {
     i64 x[64];
-    FOR (i, 0, 64) {
-        x[i] = (i64)(u64)r[i]; // preserve unsigned
-        r[i] = 0;
-    }
+    COPY(x, r, 64);
     modL(r, x);
     WIPE_BUFFER(x);
 }
@@ -1416,8 +1518,10 @@ static void reduce(u8 r[64])
 static void mul_add(u8 r[32], const u8 a[32], const u8 b[32], const u8 c[32])
 {
     i64 s[64];
-    FOR (i,  0, 32) { s[i] = (i64)(u64)c[i]; } // preserve unsigned
-    FOR (i, 32, 64) { s[i] = 0;              }
+    FOR (i, 0, 32) {
+        s[i] = (i64)(u64)c[i];  // preserve unsigned
+    }
+    ZERO(s + 32, 32);
     FOR (i,  0, 32) {
         FOR (j, 0, 32) {
             s[i+j] += a[i] * (u64)b[j];
@@ -1437,11 +1541,18 @@ static int is_above_L(const u8 a[32])
     return 1;
 }
 
-// Point in a twisted Edwards curve,
+///////////////
+/// Ed25519 ///
+///////////////
+
+// Point (group element, ge) in a twisted Edwards curve,
 // in extended projective coordinates.
-// x = X/Z, y = Y/Z, T = XY/Z
+// ge        : x  = X/Z, y  = Y/Z, T  = XY/Z
+// ge_cached : Yp = X+Y, Ym = X-Y, T2 = T*D2
+// ge_precomp: Z  = 1
 typedef struct { fe X;  fe Y;  fe Z; fe T;  } ge;
 typedef struct { fe Yp; fe Ym; fe Z; fe T2; } ge_cached;
+typedef struct { fe Yp; fe Ym;       fe T2; } ge_precomp;
 
 static void ge_zero(ge *p)
 {
@@ -1458,75 +1569,82 @@ static void ge_tobytes(u8 s[32], const ge *h)
     fe_mul(x, h->X, recip);
     fe_mul(y, h->Y, recip);
     fe_tobytes(s, y);
-    s[31] ^= fe_isnegative(x) << 7;
+    s[31] ^= fe_isodd(x) << 7;
 
     WIPE_BUFFER(recip);
     WIPE_BUFFER(x);
     WIPE_BUFFER(y);
 }
 
-// Variable time! s must not be secret!
-static int ge_frombytes_neg_vartime(ge *h, const u8 s[32])
+// h = s, where s is a point encoded in 32 bytes
+//
+// Variable time!  Inputs must not be secret!
+// => Use only to *check* signatures.
+//
+// From the specifications:
+//   The encoding of s contains y and the sign of x
+//   x = sqrt((y^2 - 1) / (d*y^2 + 1))
+// In extended coordinates:
+//   X = x, Y = y, Z = 1, T = x*y
+//
+//    Note that num * den is a square iff num / den is a square
+//    If num * den is not a square, the point was not on the curve.
+// From the above:
+//   Let num =   y^2 - 1
+//   Let den = d*y^2 + 1
+//   x = sqrt((y^2 - 1) / (d*y^2 + 1))
+//   x = sqrt(num / den)
+//   x = sqrt(num^2 / (num * den))
+//   x = num * sqrt(1 / (num * den))
+//
+// Therefore, we can just compute:
+//   num =   y^2 - 1
+//   den = d*y^2 + 1
+//   isr = invsqrt(num * den)  // abort if not square
+//   x   = num * isr
+// Finally, negate x if its sign is not as specified.
+static int ge_frombytes_vartime(ge *h, const u8 s[32])
 {
-    static const fe d = {
+    static const fe d = { // −121665 / 121666
         -10913610, 13857413, -15372611, 6949391, 114729,
         -8787816, -6275908, -3247719, -18696448, -12055116
-    } ;
-    static const fe sqrtm1 = {
-        -32595792, -7943725, 9377950, 3500415, 12389472,
-        -272473, -25146209, -2005654, 326686, 11406482
-    } ;
-    fe u, v, v3; // no secret, no wipe
+    };
     fe_frombytes(h->Y, s);
     fe_1(h->Z);
-    fe_sq(u, h->Y);            // y^2
-    fe_mul(v, u, d);
-    fe_sub(u, u, h->Z);        // u = y^2-1
-    fe_add(v, v, h->Z);        // v = dy^2+1
-
-    fe_sq(v3, v);
-    fe_mul(v3, v3, v);         // v3 = v^3
-    fe_sq(h->X, v3);
-    fe_mul(h->X, h->X, v);
-    fe_mul(h->X, h->X, u);     // x = uv^7
-
-    fe_pow22523(h->X, h->X);   // x = (uv^7)^((q-5)/8)
-    fe_mul(h->X, h->X, v3);
-    fe_mul(h->X, h->X, u);     // x = uv^3(uv^7)^((q-5)/8)
-
-    fe vxx, check; // no secret, no wipe
-    fe_sq(vxx, h->X);
-    fe_mul(vxx, vxx, v);
-    fe_sub(check, vxx, u);     // vx^2-u
-    if (fe_isnonzero(check)) {
-        fe_add(check, vxx, u); // vx^2+u
-        if (fe_isnonzero(check)) {
-            return -1;
-        }
-        fe_mul(h->X, h->X, sqrtm1);
+    fe_sq (h->T, h->Y);        // t =   y^2
+    fe_mul(h->X, h->T, d   );  // x = d*y^2
+    fe_sub(h->T, h->T, h->Z);  // t =   y^2 - 1
+    fe_add(h->X, h->X, h->Z);  // x = d*y^2 + 1
+    fe_mul(h->X, h->T, h->X);  // x = (y^2 - 1) * (d*y^2 + 1)
+    int is_square = invsqrt(h->X, h->X);
+    if (!is_square) {
+        return -1;             // Not on the curve, abort
     }
-    if (fe_isnegative(h->X) == (s[31] >> 7)) {
+    fe_mul(h->X, h->T, h->X);  // x = sqrt((y^2 - 1) / (d*y^2 + 1))
+    if (fe_isodd(h->X) != (s[31] >> 7)) {
         fe_neg(h->X, h->X);
     }
     fe_mul(h->T, h->X, h->Y);
     return 0;
 }
 
+// - 2 * 121665 / 121666
+static const fe D2 = {-21827239, -5839606, -30745221, 13898782, 229458,
+                      15978800, -12551817, -6495438, 29715968, 9444199,};
+
 static void ge_cache(ge_cached *c, const ge *p)
 {
-    static const fe D2 = { // - 2 * 121665 / 121666
-        -21827239, -5839606, -30745221, 13898782, 229458,
-        15978800, -12551817, -6495438, 29715968, 9444199
-    };
     fe_add (c->Yp, p->Y, p->X);
     fe_sub (c->Ym, p->Y, p->X);
     fe_copy(c->Z , p->Z      );
     fe_mul (c->T2, p->T, D2  );
 }
 
+// Internal buffers are not wiped! Inputs must not be secret!
+// => Use only to *check* signatures.
 static void ge_add(ge *s, const ge *p, const ge_cached *q)
 {
-    fe a, b; // not used to process secrets, no need to wipe
+    fe a, b;
     fe_add(a   , p->Y, p->X );
     fe_sub(b   , p->Y, p->X );
     fe_mul(a   , a   , q->Yp);
@@ -1546,6 +1664,8 @@ static void ge_add(ge *s, const ge *p, const ge_cached *q)
     fe_mul(s->Z, a   , b   );
 }
 
+// Internal buffers are not wiped! Inputs must not be secret!
+// => Use only to *check* signatures.
 static void ge_sub(ge *s, const ge *p, const ge_cached *q)
 {
     ge_cached neg;
@@ -1556,18 +1676,17 @@ static void ge_sub(ge *s, const ge *p, const ge_cached *q)
     ge_add(s, p, &neg);
 }
 
-static void ge_madd(ge *s, const ge *p, const fe yp, const fe ym, const fe t2,
-                    fe a, fe b)
+static void ge_madd(ge *s, const ge *p, const ge_precomp *q, fe a, fe b)
 {
     fe_add(a   , p->Y, p->X );
     fe_sub(b   , p->Y, p->X );
-    fe_mul(a   , a   , yp   );
-    fe_mul(b   , b   , ym   );
+    fe_mul(a   , a   , q->Yp);
+    fe_mul(b   , b   , q->Ym);
     fe_add(s->Y, a   , b    );
     fe_sub(s->X, a   , b    );
 
     fe_add(s->Z, p->Z, p->Z );
-    fe_mul(s->T, p->T, t2   );
+    fe_mul(s->T, p->T, q->T2);
     fe_add(a   , s->Z, s->T );
     fe_sub(b   , s->Z, s->T );
 
@@ -1577,14 +1696,24 @@ static void ge_madd(ge *s, const ge *p, const fe yp, const fe ym, const fe t2,
     fe_mul(s->Z, a   , b   );
 }
 
-// Internal buffers are not wiped! Inputs must not be secret!
-// => Use only to *check* signatures.
-static void ge_msub(ge *s, const ge *p, const fe yp, const fe ym, const fe t2,
-                    fe a, fe b)
+static void ge_msub(ge *s, const ge *p, const ge_precomp *q, fe a, fe b)
 {
-    fe n2;
-    fe_neg(n2, t2);
-    ge_madd(s, p, ym, yp, n2, a, b);
+    fe_add(a   , p->Y, p->X );
+    fe_sub(b   , p->Y, p->X );
+    fe_mul(a   , a   , q->Ym);
+    fe_mul(b   , b   , q->Yp);
+    fe_add(s->Y, a   , b    );
+    fe_sub(s->X, a   , b    );
+
+    fe_add(s->Z, p->Z, p->Z );
+    fe_mul(s->T, p->T, q->T2);
+    fe_sub(a   , s->Z, s->T );
+    fe_add(b   , s->Z, s->T );
+
+    fe_mul(s->T, s->X, s->Y);
+    fe_mul(s->X, s->X, b   );
+    fe_mul(s->Y, s->Y, a   );
+    fe_mul(s->Z, a   , b   );
 }
 
 static void ge_double(ge *s, const ge *p, ge *q)
@@ -1605,59 +1734,56 @@ static void ge_double(ge *s, const ge *p, ge *q)
     fe_mul(s->T, q->X , q->T);
 }
 
-static const fe window_Yp[8] = {
-    {25967493, -14356035, 29566456, 3660896, -12694345,
-     4014787, 27544626, -11754271, -6079156, 2047605},
-    {15636291, -9688557, 24204773, -7912398, 616977,
-     -16685262, 27787600, -14772189, 28944400, -1550024},
-    {10861363, 11473154, 27284546, 1981175, -30064349,
-     12577861, 32867885, 14515107, -15438304, 10819380},
-    {5153746, 9909285, 1723747, -2777874, 30523605,
-     5516873, 19480852, 5230134, -23952439, -15175766},
-    {-22518993, -6692182, 14201702, -8745502, -23510406,
-     8844726, 18474211, -1361450, -13062696, 13821877},
-    {-25154831, -4185821, 29681144, 7868801, -6854661,
-     -9423865, -12437364, -663000, -31111463, -16132436},
-    {-33521811, 3180713, -2394130, 14003687, -16903474,
-     -16270840, 17238398, 4729455, -18074513, 9256800},
-    {-3151181, -5046075, 9282714, 6866145, -31907062,
-     -863023, -18940575, 15033784, 25105118, -7894876},
-};
-static const fe window_Ym[8] = {
-    {-12545711, 934262, -2722910, 3049990, -727428,
-     9406986, 12720692, 5043384, 19500929, -15469378},
-    {16568933, 4717097, -11556148, -1102322, 15682896,
-     -11807043, 16354577, -11775962, 7689662, 11199574},
-    {4708026, 6336745, 20377586, 9066809, -11272109,
-     6594696, -25653668, 12483688, -12668491, 5581306},
-    {-30269007, -3463509, 7665486, 10083793, 28475525,
-     1649722, 20654025, 16520125, 30598449, 7715701},
-    {-6455177, -7839871, 3374702, -4740862, -27098617,
-     -10571707, 31655028, -7212327, 18853322, -14220951},
-    {25576264, -2703214, 7349804, -11814844, 16472782,
-     9300885, 3844789, 15725684, 171356, 6466918},
-    {-25182317, -4174131, 32336398, 5036987, -21236817,
-     11360617, 22616405, 9761698, -19827198, 630305},
-    {-24326370, 15950226, -31801215, -14592823, -11662737,
-     -5090925, 1573892, -2625887, 2198790, -15804619},
-};
-static const fe window_T2[8] = {
-    {-8738181, 4489570, 9688441, -14785194, 10184609,
-     -12363380, 29287919, 11864899, -24514362, -4438546},
-    {30464156, -5976125, -11779434, -15670865, 23220365,
-     15915852, 7512774, 10017326, -17749093, -9920357},
-    {19563160, 16186464, -29386857, 4097519, 10237984,
-     -4348115, 28542350, 13850243, -23678021, -15815942},
-    {28881845, 14381568, 9657904, 3680757, -20181635,
-     7843316, -31400660, 1370708, 29794553, -1409300},
-    {4566830, -12963868, -28974889, -12240689, -7602672,
-     -2830569, -8514358, -10431137, 2207753, -3209784},
-    {23103977, 13316479, 9739013, -16149481, 817875,
-     -15038942, 8965339, -14088058, -30714912, 16193877},
-    {-13720693, 2639453, -24237460, -7406481, 9494427,
-     -5774029, -6554551, -15960994, -2449256, -14291300},
-    {-3099351, 10324967, -2241613, 7453183, -5446979,
-     -2735503, -13812022, -16236442, -32461234, -12290683},
+// 5-bit signed window in cached format (Niels coordinates, Z=1)
+static const ge_precomp b_window[8] = {
+    {{25967493,-14356035,29566456,3660896,-12694345,
+      4014787,27544626,-11754271,-6079156,2047605,},
+     {-12545711,934262,-2722910,3049990,-727428,
+      9406986,12720692,5043384,19500929,-15469378,},
+     {-8738181,4489570,9688441,-14785194,10184609,
+      -12363380,29287919,11864899,-24514362,-4438546,},},
+    {{15636291,-9688557,24204773,-7912398,616977,
+      -16685262,27787600,-14772189,28944400,-1550024,},
+     {16568933,4717097,-11556148,-1102322,15682896,
+      -11807043,16354577,-11775962,7689662,11199574,},
+     {30464156,-5976125,-11779434,-15670865,23220365,
+      15915852,7512774,10017326,-17749093,-9920357,},},
+    {{10861363,11473154,27284546,1981175,-30064349,
+      12577861,32867885,14515107,-15438304,10819380,},
+     {4708026,6336745,20377586,9066809,-11272109,
+      6594696,-25653668,12483688,-12668491,5581306,},
+     {19563160,16186464,-29386857,4097519,10237984,
+      -4348115,28542350,13850243,-23678021,-15815942,},},
+    {{5153746,9909285,1723747,-2777874,30523605,
+      5516873,19480852,5230134,-23952439,-15175766,},
+     {-30269007,-3463509,7665486,10083793,28475525,
+      1649722,20654025,16520125,30598449,7715701,},
+     {28881845,14381568,9657904,3680757,-20181635,
+      7843316,-31400660,1370708,29794553,-1409300,},},
+    {{-22518993,-6692182,14201702,-8745502,-23510406,
+      8844726,18474211,-1361450,-13062696,13821877,},
+     {-6455177,-7839871,3374702,-4740862,-27098617,
+      -10571707,31655028,-7212327,18853322,-14220951,},
+     {4566830,-12963868,-28974889,-12240689,-7602672,
+      -2830569,-8514358,-10431137,2207753,-3209784,},},
+    {{-25154831,-4185821,29681144,7868801,-6854661,
+      -9423865,-12437364,-663000,-31111463,-16132436,},
+     {25576264,-2703214,7349804,-11814844,16472782,
+      9300885,3844789,15725684,171356,6466918,},
+     {23103977,13316479,9739013,-16149481,817875,
+      -15038942,8965339,-14088058,-30714912,16193877,},},
+    {{-33521811,3180713,-2394130,14003687,-16903474,
+      -16270840,17238398,4729455,-18074513,9256800,},
+     {-25182317,-4174131,32336398,5036987,-21236817,
+      11360617,22616405,9761698,-19827198,630305,},
+     {-13720693,2639453,-24237460,-7406481,9494427,
+      -5774029,-6554551,-15960994,-2449256,-14291300,},},
+    {{-3151181,-5046075,9282714,6866145,-31907062,
+      -863023,-18940575,15033784,25105118,-7894876,},
+     {-24326370,15950226,-31801215,-14592823,-11662737,
+      -5090925,1573892,-2625887,2198790,-15804619,},
+     {-3099351,10324967,-2241613,7453183,-5446979,
+      -2735503,-13812022,-16236442,-32461234,-12290683,},},
 };
 
 // Incremental sliding windows (left to right)
@@ -1714,12 +1840,12 @@ static int slide_step(slide_ctx *ctx, int width, int i, const u8 scalar[32])
     return i == ctx->next_index ? ctx->next_digit: 0;
 }
 
-
 #define P_W_WIDTH 3 // Affects the size of the stack
 #define B_W_WIDTH 5 // Affects the size of the binary
 #define P_W_SIZE  (1<<(P_W_WIDTH-2))
-#define B_W_SIZE  (1<<(B_W_WIDTH-2))
 
+// P = [b]B + [p]P, where B is the base point
+//
 // Variable time! Internal buffers are not wiped! Inputs must not be secret!
 // => Use only to *check* signatures.
 static void ge_double_scalarmult_vartime(ge *P, const u8 p[32], const u8 b[32])
@@ -1730,9 +1856,9 @@ static void ge_double_scalarmult_vartime(ge *P, const u8 p[32], const u8 b[32])
         ge P2, tmp;
         ge_double(&P2, P, &tmp);
         ge_cache(&cP[0], P);
-        FOR (i, 0, (P_W_SIZE)-1) {
-            ge_add(&tmp, &P2, &cP[i]);
-            ge_cache(&cP[i+1], &tmp);
+        FOR (i, 1, P_W_SIZE) {
+            ge_add(&tmp, &P2, &cP[i-1]);
+            ge_cache(&cP[i], &tmp);
         }
     }
 
@@ -1750,153 +1876,162 @@ static void ge_double_scalarmult_vartime(ge *P, const u8 p[32], const u8 b[32])
         if (p_digit > 0) { ge_add(sum, sum, &cP[ p_digit / 2]); }
         if (p_digit < 0) { ge_sub(sum, sum, &cP[-p_digit / 2]); }
         fe t1, t2;
-        if (b_digit > 0) { ge_madd(sum, sum,
-                                   window_Yp[ b_digit / 2],
-                                   window_Ym[ b_digit / 2],
-                                   window_T2[ b_digit / 2], t1, t2); }
-        if (b_digit < 0) { ge_msub(sum, sum,
-                                   window_Yp[-b_digit / 2],
-                                   window_Ym[-b_digit / 2],
-                                   window_T2[-b_digit / 2], t1, t2); }
+        if (b_digit > 0) { ge_madd(sum, sum, b_window +  b_digit/2, t1, t2); }
+        if (b_digit < 0) { ge_msub(sum, sum, b_window + -b_digit/2, t1, t2); }
         i--;
     }
 }
 
+// R_check = s[B] - h_ram[pk], where B is the base point
+//
+// Variable time! Internal buffers are not wiped! Inputs must not be secret!
+// => Use only to *check* signatures.
+static int ge_r_check(u8 R_check[32], u8 s[32], u8 h_ram[32], u8 pk[32])
+{
+    ge A; // not secret, not wiped
+    if (ge_frombytes_vartime(&A, pk) ||         // A = pk
+        is_above_L(s)) {                        // prevent s malleability
+        return -1;
+    }
+    fe_neg(A.X, A.X);
+    fe_neg(A.T, A.T);                           // A = -pk
+    ge_double_scalarmult_vartime(&A, h_ram, s); // A = [s]B - [h_ram]pk
+    ge_tobytes(R_check, &A);                    // R_check = A
+    return 0;
+}
+
 // 5-bit signed comb in cached format (Niels coordinates, Z=1)
-static const fe comb_Yp[16] = {
-    {2615675, 9989699, 17617367, -13953520, -8802803,
-     1447286, -8909978, -270892, -12199203, -11617247},
-    {-1271192, 4785266, -29856067, -6036322, -10435381,
-     15493337, 20321440, -6036064, 15902131, 13420909},
-    {-26170888, -12891603, 9568996, -6197816, 26424622,
-     16308973, -4518568, -3771275, -15522557, 3991142},
-    {-25875044, 1958396, 19442242, -9809943, -26099408,
-     -18589, -30794750, -14100910, 4971028, -10535388},
-    {-13896937, -7357727, -12131124, 617289, -33188817,
-     10080542, 6402555, 10779157, 1176712, 2472642},
-    {71503, 12662254, -17008072, -8370006, 23408384,
-     -12897959, 32287612, 11241906, -16724175, 15336924},
-    {27397666, 4059848, 23573959, 8868915, -10602416,
-     -10456346, -22812831, -9666299, 31810345, -2695469},
-    {-3418193, -694531, 2320482, -11850408, -1981947,
-     -9606132, 23743894, 3933038, -25004889, -4478918},
-    {-4448372, 5537982, -4805580, 14016777, 15544316,
-     16039459, -7143453, -8003716, -21904564, 8443777},
-    {32495180, 15749868, 2195406, -15542321, -3213890,
-     -4030779, -2915317, 12751449, -1872493, 11926798},
-    {26779741, 12553580, -24344000, -4071926, -19447556,
-     -13464636, 21989468, 7826656, -17344881, 10055954},
-    {5848288, -1639207, -10452929, -11760637, 6484174,
-     -5895268, -11561603, 587105, -19220796, 14378222},
-    {32050187, 12536702, 9206308, -10016828, -13333241,
-     -4276403, -24225594, 14562479, -31803624, -9967812},
-    {23536033, -6219361, 199701, 4574817, 30045793,
-     7163081, -2244033, 883497, 10960746, -14779481},
-    {-8143354, -11558749, 15772067, 14293390, 5914956,
-     -16702904, -7410985, 7536196, 6155087, 16571424},
-    {6211591, -11166015, 24568352, 2768318, -10822221,
-     11922793, 33211827, 3852290, -13160369, -8855385},
-};
-static const fe comb_Ym[16] = {
-    {8873912, 14981221, 13714139, 6923085, 25481101,
-     4243739, 4646647, -203847, 9015725, -16205935},
-    {-1827892, 15407265, 2351140, -11810728, 28403158,
-     -1487103, -15057287, -4656433, -3780118, -1145998},
-    {-30623162, -11845055, -11327147, -16008347, 17564978,
-     -1449578, -20580262, 14113978, 29643661, 15580734},
-    {-15109423, 13348938, -14756006, 14132355, 30481360,
-     1830723, -240510, 9371801, -13907882, 8024264},
-    {25119567, 5628696, 10185251, -9279452, 683770,
-     -14523112, -7982879, -16450545, 1431333, -13253541},
-    {-8390493, 1276691, 19008763, -12736675, -9249429,
-     -12526388, 17434195, -13761261, 18962694, -1227728},
-    {26361856, -12366343, 8941415, 15163068, 7069802,
-     -7240693, -18656349, 8167008, 31106064, -1670658},
-    {-5677136, -11012483, -1246680, -6422709, 14772010,
-     1829629, -11724154, -15914279, -18177362, 1301444},
-    {937094, 12383516, -22597284, 7580462, -18767748,
-     13813292, -2323566, 13503298, 11510849, -10561992},
-    {28028043, 14715827, -6558532, -1773240, 27563607,
-     -9374554, 3201863, 8865591, -16953001, 7659464},
-    {13628467, 5701368, 4674031, 11935670, 11461401,
-     10699118, 31846435, -114971, -8269924, -14777505},
-    {-22124018, -12859127, 11966893, 1617732, 30972446,
-     -14350095, -21822286, 8369862, -29443219, -15378798},
-    {290131, -471434, 8840522, -2654851, 25963762,
-     -11578288, -7227978, 13847103, 30641797, 6003514},
-    {-23547482, -11475166, -11913550, 9374455, 22813401,
-     -5707910, 26635288, 9199956, 20574690, 2061147},
-    {9715324, 7036821, -17981446, -11505533, 26555178,
-     -3571571, 5697062, -14128022, 2795223, 9694380},
-    {14864569, -6319076, -3080, -8151104, 4994948,
-     -1572144, -41927, 9269803, 13881712, -13439497},
-};
-static const fe comb_T2[16] = {
-    {-18494317, 2686822, 18449263, -13905325, 5966562,
-     -3368714, 2738304, -8583315, 15987143, 12180258},
-    {-33336513, -13705917, -18473364, -5039204, -4268481,
-     -4136039, -8192211, -2935105, -19354402, 5995895},
-    {-19753139, -1729018, 21880604, 13471713, 28315373,
-     -8530159, -17492688, 11730577, -8790216, 3942124},
-    {17278020, 3905045, 29577748, 11151940, 18451761,
-     -6801382, 31480073, -13819665, 26308905, 10868496},
-    {26937294, 3313561, 28601532, -3497112, -22814130,
-     11073654, 8956359, -16757370, 13465868, 16623983},
-    {-5468054, 6059101, -31275300, 2469124, 26532937,
-     8152142, 6423741, -11427054, -15537747, -10938247},
-    {-11303505, -9659620, -12354748, -9331434, 19501116,
-     -9146390, -841918, -5315657, 8903828, 8839982},
-    {16603354, -215859, 1591180, 3775832, -705596,
-     -13913449, 26574704, 14963118, 19649719, 6562441},
-    {33188866, -12232360, -24929148, -6133828, 21818432,
-     11040754, -3041582, -3524558, -29364727, -10264096},
-    {-20704194, -12560423, -1235774, -785473, 13240395,
-     4831780, -472624, -3796899, 25480903, -15422283},
-    {-2204347, -16313180, -21388048, 7520851, -8697745,
-     -14460961, 20894017, 12210317, -475249, -2319102},
-    {-16407882, 4940236, -21194947, 10781753, 22248400,
-     14425368, 14866511, -7552907, 12148703, -7885797},
-    {16376744, 15908865, -30663553, 4663134, -30882819,
-     -10105163, 19294784, -10800440, -33259252, 2563437},
-    {30208741, 11594088, -15145888, 15073872, 5279309,
-     -9651774, 8273234, 4796404, -31270809, -13316433},
-    {-17802574, 14455251, 27149077, -7832700, -29163160,
-     -7246767, 17498491, -4216079, 31788733, -14027536},
-    {-25233439, -9389070, -6618212, -3268087, -521386,
-     -7350198, 21035059, -14970947, 25910190, 11122681},
+static const ge_precomp b_comb[16] = {
+    {{2615675,9989699,17617367,-13953520,-8802803,
+      1447286,-8909978,-270892,-12199203,-11617247,},
+     {8873912,14981221,13714139,6923085,25481101,
+      4243739,4646647,-203847,9015725,-16205935,},
+     {-18494317,2686822,18449263,-13905325,5966562,
+      -3368714,2738304,-8583315,15987143,12180258,},},
+    {{-1271192,4785266,-29856067,-6036322,-10435381,
+      15493337,20321440,-6036064,15902131,13420909,},
+     {-1827892,15407265,2351140,-11810728,28403158,
+      -1487103,-15057287,-4656433,-3780118,-1145998,},
+     {-33336513,-13705917,-18473364,-5039204,-4268481,
+      -4136039,-8192211,-2935105,-19354402,5995895,},},
+    {{-26170888,-12891603,9568996,-6197816,26424622,
+      16308973,-4518568,-3771275,-15522557,3991142,},
+     {-30623162,-11845055,-11327147,-16008347,17564978,
+      -1449578,-20580262,14113978,29643661,15580734,},
+     {-19753139,-1729018,21880604,13471713,28315373,
+      -8530159,-17492688,11730577,-8790216,3942124,},},
+    {{-25875044,1958396,19442242,-9809943,-26099408,
+      -18589,-30794750,-14100910,4971028,-10535388,},
+     {-15109423,13348938,-14756006,14132355,30481360,
+      1830723,-240510,9371801,-13907882,8024264,},
+     {17278020,3905045,29577748,11151940,18451761,
+      -6801382,31480073,-13819665,26308905,10868496,},},
+    {{-13896937,-7357727,-12131124,617289,-33188817,
+      10080542,6402555,10779157,1176712,2472642,},
+     {25119567,5628696,10185251,-9279452,683770,
+      -14523112,-7982879,-16450545,1431333,-13253541,},
+     {26937294,3313561,28601532,-3497112,-22814130,
+      11073654,8956359,-16757370,13465868,16623983,},},
+    {{71503,12662254,-17008072,-8370006,23408384,
+      -12897959,32287612,11241906,-16724175,15336924,},
+     {-8390493,1276691,19008763,-12736675,-9249429,
+      -12526388,17434195,-13761261,18962694,-1227728,},
+     {-5468054,6059101,-31275300,2469124,26532937,
+      8152142,6423741,-11427054,-15537747,-10938247,},},
+    {{27397666,4059848,23573959,8868915,-10602416,
+      -10456346,-22812831,-9666299,31810345,-2695469,},
+     {26361856,-12366343,8941415,15163068,7069802,
+      -7240693,-18656349,8167008,31106064,-1670658,},
+     {-11303505,-9659620,-12354748,-9331434,19501116,
+      -9146390,-841918,-5315657,8903828,8839982,},},
+    {{-3418193,-694531,2320482,-11850408,-1981947,
+      -9606132,23743894,3933038,-25004889,-4478918,},
+     {-5677136,-11012483,-1246680,-6422709,14772010,
+      1829629,-11724154,-15914279,-18177362,1301444,},
+     {16603354,-215859,1591180,3775832,-705596,
+      -13913449,26574704,14963118,19649719,6562441,},},
+    {{-4448372,5537982,-4805580,14016777,15544316,
+      16039459,-7143453,-8003716,-21904564,8443777,},
+     {937094,12383516,-22597284,7580462,-18767748,
+      13813292,-2323566,13503298,11510849,-10561992,},
+     {33188866,-12232360,-24929148,-6133828,21818432,
+      11040754,-3041582,-3524558,-29364727,-10264096,},},
+    {{32495180,15749868,2195406,-15542321,-3213890,
+      -4030779,-2915317,12751449,-1872493,11926798,},
+     {28028043,14715827,-6558532,-1773240,27563607,
+      -9374554,3201863,8865591,-16953001,7659464,},
+     {-20704194,-12560423,-1235774,-785473,13240395,
+      4831780,-472624,-3796899,25480903,-15422283,},},
+    {{26779741,12553580,-24344000,-4071926,-19447556,
+      -13464636,21989468,7826656,-17344881,10055954,},
+     {13628467,5701368,4674031,11935670,11461401,
+      10699118,31846435,-114971,-8269924,-14777505,},
+     {-2204347,-16313180,-21388048,7520851,-8697745,
+      -14460961,20894017,12210317,-475249,-2319102,},},
+    {{5848288,-1639207,-10452929,-11760637,6484174,
+      -5895268,-11561603,587105,-19220796,14378222,},
+     {-22124018,-12859127,11966893,1617732,30972446,
+      -14350095,-21822286,8369862,-29443219,-15378798,},
+     {-16407882,4940236,-21194947,10781753,22248400,
+      14425368,14866511,-7552907,12148703,-7885797,},},
+    {{32050187,12536702,9206308,-10016828,-13333241,
+      -4276403,-24225594,14562479,-31803624,-9967812,},
+     {290131,-471434,8840522,-2654851,25963762,
+      -11578288,-7227978,13847103,30641797,6003514,},
+     {16376744,15908865,-30663553,4663134,-30882819,
+      -10105163,19294784,-10800440,-33259252,2563437,},},
+    {{23536033,-6219361,199701,4574817,30045793,
+      7163081,-2244033,883497,10960746,-14779481,},
+     {-23547482,-11475166,-11913550,9374455,22813401,
+      -5707910,26635288,9199956,20574690,2061147,},
+     {30208741,11594088,-15145888,15073872,5279309,
+      -9651774,8273234,4796404,-31270809,-13316433,},},
+    {{-8143354,-11558749,15772067,14293390,5914956,
+      -16702904,-7410985,7536196,6155087,16571424,},
+     {9715324,7036821,-17981446,-11505533,26555178,
+      -3571571,5697062,-14128022,2795223,9694380,},
+     {-17802574,14455251,27149077,-7832700,-29163160,
+      -7246767,17498491,-4216079,31788733,-14027536,},},
+    {{6211591,-11166015,24568352,2768318,-10822221,
+      11922793,33211827,3852290,-13160369,-8855385,},
+     {14864569,-6319076,-3080,-8151104,4994948,
+      -1572144,-41927,9269803,13881712,-13439497,},
+     {-25233439,-9389070,-6618212,-3268087,-521386,
+      -7350198,21035059,-14970947,25910190,11122681,},},
 };
 
+
+// p = [scalar]B, where B is the base point
 static void ge_scalarmult_base(ge *p, const u8 scalar[32])
 {
     // 5-bits signed comb, from Mike Hamburg's
     // Fast and compact elliptic-curve cryptography (2012)
-    static const u8 half_mod_L[32] = { // 1 / 2 modulo L
-        0xf7, 0xe9, 0x7a, 0x2e, 0x8d, 0x31, 0x09, 0x2c,
-        0x6b, 0xce, 0x7b, 0x51, 0xef, 0x7c, 0x6f, 0x0a,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
-    };
-    static const u8 half_ones[32] = { // (2^255 - 1) / 2 modulo L
-        0x42, 0x9a, 0xa3, 0xba, 0x23, 0xa5, 0xbf, 0xcb,
-        0x11, 0x5b, 0x9d, 0xc5, 0x74, 0x95, 0xf3, 0xb6,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x07,
-    };
+    // 1 / 2 modulo L
+    static const u8 half_mod_L[32] = {
+        0xf7, 0xe9, 0x7a, 0x2e, 0x8d, 0x31, 0x09, 0x2c, 0x6b, 0xce, 0x7b, 0x51,
+        0xef, 0x7c, 0x6f, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, };
+    // (2^255 - 1) / 2 modulo L
+    static const u8 half_ones[32] = {
+        0x42, 0x9a, 0xa3, 0xba, 0x23, 0xa5, 0xbf, 0xcb, 0x11, 0x5b, 0x9d, 0xc5,
+        0x74, 0x95, 0xf3, 0xb6, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x07, };
     // All bits set form: 1 means 1, 0 means -1
     u8 s_scalar[32];
     mul_add(s_scalar, scalar, half_mod_L, half_ones);
 
     // Double and add ladder
-    fe yp, ym, t2, n2, a; // temporaries for addition
-    ge dbl;               // temporary for doubling
+    fe a, n2; // temporaries for addition
+    ge dbl;   // temporary for doubling
+    ge_precomp comb;
     ge_zero(p);
     for (int i = 50; i >= 0; i--) {
         if (i < 50) {
             ge_double(p, p, &dbl);
         }
-        fe_1(yp);
-        fe_1(ym);
-        fe_0(t2);
+        fe_1(comb.Yp);
+        fe_1(comb.Ym);
+        fe_0(comb.T2);
         u8 teeth = (u8)((scalar_bit(s_scalar, i)           ) +
                         (scalar_bit(s_scalar, i +  51) << 1) +
                         (scalar_bit(s_scalar, i + 102) << 2) +
@@ -1906,27 +2041,27 @@ static void ge_scalarmult_base(ge *p, const u8 scalar[32])
         u8 index = (teeth ^ (high - 1)) & 15;
         FOR (j, 0, 16) {
             i32 select = 1 & (((j ^ index) - 1) >> 8);
-            fe_ccopy(yp, comb_Yp[j], select);
-            fe_ccopy(ym, comb_Ym[j], select);
-            fe_ccopy(t2, comb_T2[j], select);
+            fe_ccopy(comb.Yp, b_comb[j].Yp, select);
+            fe_ccopy(comb.Ym, b_comb[j].Ym, select);
+            fe_ccopy(comb.T2, b_comb[j].T2, select);
         }
-
-        fe_neg(n2, t2);
-        fe_cswap(t2, n2, high);
-        fe_cswap(yp, ym, high);
-        ge_madd(p, p, ym, yp, n2, a, t2); // reuse t2 as temporary
+        fe_neg(n2, comb.T2);
+        fe_cswap(comb.T2, n2     , high);
+        fe_cswap(comb.Yp, comb.Ym, high);
+        ge_msub(p, p, &comb, a, n2); // reuse n2 as temporary
     }
-    WIPE_CTX(&dbl);
-    WIPE_BUFFER(yp);  WIPE_BUFFER(t2);  WIPE_BUFFER(a);
-    WIPE_BUFFER(ym);  WIPE_BUFFER(n2);
+    WIPE_CTX(&dbl); WIPE_CTX(&comb);
+    WIPE_BUFFER(a); WIPE_BUFFER(n2);
     WIPE_BUFFER(s_scalar);
 }
 
-void crypto_sign_public_key(u8 public_key[32], const u8 secret_key[32])
+void crypto_sign_public_key_custom_hash(u8       public_key[32],
+                                        const u8 secret_key[32],
+                                        const crypto_sign_vtable *hash)
 {
     u8 a[64];
-    HASH(a, secret_key, 32);
-    trim_scalar(a);
+    hash->hash(a, secret_key, 32);
+    trim_scalar(a, a);
     ge A;
     ge_scalarmult_base(&A, a);
     ge_tobytes(public_key, &A);
@@ -1934,41 +2069,57 @@ void crypto_sign_public_key(u8 public_key[32], const u8 secret_key[32])
     WIPE_CTX(&A);
 }
 
-void crypto_sign_init_first_pass(crypto_sign_ctx *ctx,
-                                 const u8 secret_key[32],
-                                 const u8 public_key[32])
+void crypto_sign_public_key(u8 public_key[32], const u8 secret_key[32])
 {
+    crypto_sign_public_key_custom_hash(public_key, secret_key,
+                                       &crypto_blake2b_vtable);
+}
+
+void crypto_sign_init_first_pass_custom_hash(crypto_sign_ctx_abstract *ctx,
+                                             const u8 secret_key[32],
+                                             const u8 public_key[32],
+                                             const crypto_sign_vtable *hash)
+{
+    ctx->hash  = hash; // set vtable
     u8 *a      = ctx->buf;
     u8 *prefix = ctx->buf + 32;
-    HASH(a, secret_key, 32);
-    trim_scalar(a);
+    ctx->hash->hash(a, secret_key, 32);
+    trim_scalar(a, a);
 
     if (public_key == 0) {
-        crypto_sign_public_key(ctx->pk, secret_key);
+        crypto_sign_public_key_custom_hash(ctx->pk, secret_key, ctx->hash);
     } else {
-        FOR (i, 0, 32) {
-            ctx->pk[i] = public_key[i];
-        }
+        COPY(ctx->pk, public_key, 32);
     }
 
-    // Constructs the "random" nonce from the secret key and message.
+    // Deterministic part of EdDSA: Construct a nonce by hashing the message
+    // instead of generating a random number.
     // An actual random number would work just fine, and would save us
     // the trouble of hashing the message twice.  If we did that
     // however, the user could fuck it up and reuse the nonce.
-    HASH_INIT  (&ctx->hash);
-    HASH_UPDATE(&ctx->hash, prefix , 32);
+    ctx->hash->init  (ctx);
+    ctx->hash->update(ctx, prefix , 32);
 }
 
-void crypto_sign_update(crypto_sign_ctx *ctx, const u8 *msg, size_t msg_size)
+void crypto_sign_init_first_pass(crypto_sign_ctx_abstract *ctx,
+                                 const u8 secret_key[32],
+                                 const u8 public_key[32])
 {
-    HASH_UPDATE(&ctx->hash, msg, msg_size);
+    crypto_sign_init_first_pass_custom_hash(ctx, secret_key, public_key,
+                                            &crypto_blake2b_vtable);
 }
 
-void crypto_sign_init_second_pass(crypto_sign_ctx *ctx)
+void crypto_sign_update(crypto_sign_ctx_abstract *ctx,
+                        const u8 *msg, size_t msg_size)
+{
+    ctx->hash->update(ctx, msg, msg_size);
+}
+
+void crypto_sign_init_second_pass(crypto_sign_ctx_abstract *ctx)
 {
     u8 *r        = ctx->buf + 32;
     u8 *half_sig = ctx->buf + 64;
-    HASH_FINAL(&ctx->hash, r);
+    ctx->hash->final(ctx, r);
     reduce(r);
 
     // first half of the signature = "random" nonce times the base point
@@ -1979,25 +2130,23 @@ void crypto_sign_init_second_pass(crypto_sign_ctx *ctx)
 
     // Hash R, the public key, and the message together.
     // It cannot be done in parallel with the first hash.
-    HASH_INIT  (&ctx->hash);
-    HASH_UPDATE(&ctx->hash, half_sig, 32);
-    HASH_UPDATE(&ctx->hash, ctx->pk , 32);
+    ctx->hash->init  (ctx);
+    ctx->hash->update(ctx, half_sig, 32);
+    ctx->hash->update(ctx, ctx->pk , 32);
 }
 
-void crypto_sign_final(crypto_sign_ctx *ctx, u8 signature[64])
+void crypto_sign_final(crypto_sign_ctx_abstract *ctx, u8 signature[64])
 {
     u8 *a        = ctx->buf;
     u8 *r        = ctx->buf + 32;
     u8 *half_sig = ctx->buf + 64;
-    u8 h_ram[64];
-    HASH_FINAL(&ctx->hash, h_ram);
+    u8  h_ram[64];
+    ctx->hash->final(ctx, h_ram);
     reduce(h_ram);
-    FOR (i, 0, 32) {
-        signature[i] = half_sig[i];
-    }
+    COPY(signature, half_sig, 32);
     mul_add(signature + 32, h_ram, a, r); // s = h_ram * a + r
-    WIPE_CTX(ctx);
     WIPE_BUFFER(h_ram);
+    crypto_wipe(ctx, ctx->hash->ctx_size);
 }
 
 void crypto_sign(u8        signature[64],
@@ -2006,198 +2155,669 @@ void crypto_sign(u8        signature[64],
                  const u8 *message, size_t message_size)
 {
     crypto_sign_ctx ctx;
-    crypto_sign_init_first_pass (&ctx, secret_key, public_key);
-    crypto_sign_update          (&ctx, message, message_size);
-    crypto_sign_init_second_pass(&ctx);
-    crypto_sign_update          (&ctx, message, message_size);
-    crypto_sign_final           (&ctx, signature);
+    crypto_sign_ctx_abstract *actx = (crypto_sign_ctx_abstract*)&ctx;
+    crypto_sign_init_first_pass (actx, secret_key, public_key);
+    crypto_sign_update          (actx, message, message_size);
+    crypto_sign_init_second_pass(actx);
+    crypto_sign_update          (actx, message, message_size);
+    crypto_sign_final           (actx, signature);
 }
 
-void crypto_check_init(crypto_check_ctx *ctx,
-                      const u8 signature[64],
-                      const u8 public_key[32])
+void crypto_check_init_custom_hash(crypto_check_ctx_abstract *ctx,
+                                   const u8 signature[64],
+                                   const u8 public_key[32],
+                                   const crypto_sign_vtable *hash)
 {
-    FOR (i, 0, 64) { ctx->sig[i] = signature [i]; }
-    FOR (i, 0, 32) { ctx->pk [i] = public_key[i]; }
-    HASH_INIT  (&ctx->hash);
-    HASH_UPDATE(&ctx->hash, signature , 32);
-    HASH_UPDATE(&ctx->hash, public_key, 32);
+    ctx->hash = hash; // set vtable
+    COPY(ctx->buf, signature , 64);
+    COPY(ctx->pk , public_key, 32);
+    ctx->hash->init  (ctx);
+    ctx->hash->update(ctx, signature , 32);
+    ctx->hash->update(ctx, public_key, 32);
 }
 
-void crypto_check_update(crypto_check_ctx *ctx, const u8 *msg, size_t msg_size)
+void crypto_check_init(crypto_check_ctx_abstract *ctx, const u8 signature[64],
+                       const u8 public_key[32])
 {
-    HASH_UPDATE(&ctx->hash, msg , msg_size);
+    crypto_check_init_custom_hash(ctx, signature, public_key,
+                                  &crypto_blake2b_vtable);
 }
 
-int crypto_check_final(crypto_check_ctx *ctx)
+void crypto_check_update(crypto_check_ctx_abstract *ctx,
+                         const u8 *msg, size_t msg_size)
 {
-    ge  A;
-    u8 *h_ram   = ctx->pk; // save stack space
-    u8 *R_check = ctx->pk; // save stack space
-    u8 *R       = ctx->sig;                      // R
-    u8 *s       = ctx->sig + 32;                 // s
-    ge *diff    = &A;                            // -A is overwritten...
-    if (ge_frombytes_neg_vartime(&A, ctx->pk) ||
-        is_above_L(s)) { // prevent s malleability
+    ctx->hash->update(ctx, msg, msg_size);
+}
+
+int crypto_check_final(crypto_check_ctx_abstract *ctx)
+{
+    u8 h_ram[64];
+    ctx->hash->final(ctx, h_ram);
+    reduce(h_ram);
+    u8 *R       = ctx->buf;      // R
+    u8 *s       = ctx->buf + 32; // s
+    u8 *R_check = ctx->pk;       // overwrite ctx->pk to save stack space
+    if (ge_r_check(R_check, s, h_ram, ctx->pk)) {
         return -1;
     }
-    {
-        u8 tmp[64];
-        HASH_FINAL(&ctx->hash, tmp);
-        reduce(tmp);
-        FOR (i, 0, 32) { // the extra copy saves 32 bytes of stack
-            h_ram[i] = tmp[i];
-        }
-    }
-    ge_double_scalarmult_vartime(&A, h_ram, s);  // ...here
-    ge_tobytes(R_check, diff);                   // R_check = s*B - h_ram*A
-    return crypto_verify32(R, R_check);          // R == R_check ? OK : fail
-    // No secret, no wipe
+    return crypto_verify32(R, R_check); // R == R_check ? OK : fail
 }
 
-int crypto_check(const u8  signature[64],
-                 const u8  public_key[32],
+int crypto_check(const u8  signature[64], const u8 public_key[32],
                  const u8 *message, size_t message_size)
 {
     crypto_check_ctx ctx;
-    crypto_check_init(&ctx, signature, public_key);
-    crypto_check_update(&ctx, message, message_size);
-    return crypto_check_final(&ctx);
+    crypto_check_ctx_abstract *actx = (crypto_check_ctx_abstract*)&ctx;
+    crypto_check_init  (actx, signature, public_key);
+    crypto_check_update(actx, message, message_size);
+    return crypto_check_final(actx);
+}
+
+///////////////////////
+/// EdDSA to X25519 ///
+///////////////////////
+void crypto_from_eddsa_private(u8 x25519[32], const u8 eddsa[32])
+{
+    u8 a[64];
+    crypto_blake2b(a, eddsa, 32);
+    COPY(x25519, a, 32);
+    WIPE_BUFFER(a);
+}
+
+static const fe fe_one = {1};
+
+void crypto_from_eddsa_public(u8 x25519[32], const u8 eddsa[32])
+{
+    fe t1, t2;
+    fe_frombytes(t2, eddsa);
+    fe_add(t1, fe_one, t2);
+    fe_sub(t2, fe_one, t2);
+    fe_invert(t2, t2);
+    fe_mul(t1, t1, t2);
+    fe_tobytes(x25519, t1);
+    WIPE_BUFFER(t1);
+    WIPE_BUFFER(t2);
+}
+
+/////////////////////////////////////////////
+/// Dirty ephemeral public key generation ///
+/////////////////////////////////////////////
+
+// Those functions generates a public key, *without* clearing the
+// cofactor.  Sending that key over the network leaks 3 bits of the
+// private key.  Use only to generate ephemeral keys that will be hidden
+// with crypto_curve_to_hidden().
+//
+// The public key is otherwise compatible with crypto_x25519() and
+// crypto_key_exchange() (those properly clear the cofactor).
+//
+// Note that the distribution of the resulting public keys is almost
+// uniform.  Flipping the sign of the v coordinate (not provided by this
+// function), covers the entire key space almost perfectly, where
+// "almost" means a 2^-128 bias (undetectable).  This uniformity is
+// needed to ensure the proper randomness of the resulting
+// representatives (once we apply crypto_curve_to_hidden()).
+//
+// Recall that Curve25519 has order C = 2^255 + e, with e < 2^128 (not
+// to be confused with the prime order of the main subgroup, L, which is
+// 8 times less than that).
+//
+// Generating all points would require us to multiply a point of order C
+// (the base point plus any point of order 8) by all scalars from 0 to
+// C-1.  Clamping limits us to scalars between 2^254 and 2^255 - 1. But
+// by negating the resulting point at random, we also cover scalars from
+// -2^255 + 1 to -2^254 (which modulo C is congruent to e+1 to 2^254 + e).
+//
+// In practice:
+// - Scalars from 0         to e + 1     are never generated
+// - Scalars from 2^255     to 2^255 + e are never generated
+// - Scalars from 2^254 + 1 to 2^254 + e are generated twice
+//
+// Since e < 2^128, detecting this bias requires observing over 2^100
+// representatives from a given source (this will never happen), *and*
+// recovering enough of the private key to determine that they do, or do
+// not, belong to the biased set (this practically requires solving
+// discrete logarithm, which is conjecturally intractable).
+//
+// In practice, this means the bias is impossible to detect.
+
+// s + (x*L) % 8*L
+// Guaranteed to fit in 256 bits iff s fits in 255 bits.
+//   L             < 2^253
+//   x%8           < 2^3
+//   L * (x%8)     < 2^255
+//   s             < 2^255
+//   s + L * (x%8) < 2^256
+static void add_xl(u8 s[32], u8 x)
+{
+    u32 mod8  = x & 7;
+    u32 carry = 0;
+    FOR (i , 0, 32) {
+        carry = carry + s[i] + L[i] * mod8;
+        s[i]  = (u8)carry;
+        carry >>= 8;
+    }
+}
+
+// "Small" dirty ephemeral key.
+// Use if you need to shrink the size of the binary, and can afford to
+// slow down by a factor of two (compared to the fast version)
+//
+// This version works by decoupling the cofactor from the main factor.
+//
+// - The trimmed scalar determines the main factor
+// - The clamped bits of the scalar determine the cofactor.
+//
+// Cofactor and main factor are combined into a single scalar, which is
+// then multiplied by a point of order 8*L (unlike the base point, which
+// has prime order).  That "dirty" base point is the addition of the
+// regular base point (9), and a point of order 8.
+void crypto_x25519_dirty_small(u8 public_key[32], const u8 secret_key[32])
+{
+    // Base point of order 8*L
+    // Raw scalar multiplication with it does not clear the cofactor,
+    // and the resulting public key will reveal 3 bits of the scalar.
+    static const u8 dirty_base_point[32] = {
+        0x34, 0xfc, 0x6c, 0xb7, 0xc8, 0xde, 0x58, 0x97, 0x77, 0x70, 0xd9, 0x52,
+        0x16, 0xcc, 0xdc, 0x6c, 0x85, 0x90, 0xbe, 0xcd, 0x91, 0x9c, 0x07, 0x59,
+        0x94, 0x14, 0x56, 0x3b, 0x4b, 0xa4, 0x47, 0x0f, };
+    // separate the main factor & the cofactor of the scalar
+    u8 scalar[32];
+    trim_scalar(scalar, secret_key);
+
+    // Separate the main factor and the cofactor
+    //
+    // The scalar is trimmed, so its cofactor is cleared.  The three
+    // least significant bits however still have a main factor.  We must
+    // remove it for X25519 compatibility.
+    //
+    // We exploit the fact that 5*L = 1 (modulo 8)
+    //   cofactor = lsb * 5 * L             (modulo 8*L)
+    //   combined = scalar + cofactor       (modulo 8*L)
+    //   combined = scalar + (lsb * 5 * L)  (modulo 8*L)
+    add_xl(scalar, secret_key[0] * 5);
+    scalarmult(public_key, scalar, dirty_base_point, 256);
+    WIPE_BUFFER(scalar);
+}
+
+// "Fast" dirty ephemeral key
+// We use this one by default.
+//
+// This version works by performing a regular scalar multiplication,
+// then add a low order point.  The scalar multiplication is done in
+// Edwards space for more speed (*2 compared to the "small" version).
+// The cost is a bigger binary for programs that don't also sign messages.
+void crypto_x25519_dirty_fast(u8 public_key[32], const u8 secret_key[32])
+{
+    static const fe lop_x ={21352778, 5345713, 4660180, -8347857, 24143090,
+                            14568123, 30185756, -12247770, -33528939, 8345319,};
+    static const fe lop_y ={-6952922, -1265500, 6862341, -7057498, -4037696,
+                            -5447722, 31680899, -15325402, -19365852, 1569102,};
+    u8 scalar[32];
+    ge pk;
+    trim_scalar(scalar, secret_key);
+    ge_scalarmult_base(&pk, scalar);
+
+    // Select low order point
+    // We're computing the [cofactor]lop scalar multiplication, where:
+    //   cofactor = tweak & 7.
+    //   lop      = (lop_x, lop_y)
+    //   lop_x    = sqrt((sqrt(d + 1) + 1) / d)
+    //   lop_y    = -lop_x * sqrtm1
+    // Notes:
+    // - A (single) Montgomery ladder would be twice as slow.
+    // - An actual scalar multiplication would hurt performance.
+    // - A full table lookup would take more code.
+    u8 cofactor = secret_key[0] & 7;
+    int a = (cofactor >> 2) & 1;
+    int b = (cofactor >> 1) & 1;
+    int c = (cofactor >> 0) & 1;
+    fe t1, t2, t3;
+    fe_0(t1);
+    fe_ccopy(t1, sqrtm1, b);
+    fe_ccopy(t1, lop_x , c);
+    fe_neg  (t3, t1);
+    fe_ccopy(t1, t3, a);
+    fe_1(t2);
+    fe_0(t3);
+    fe_ccopy(t2, t3   , b);
+    fe_ccopy(t2, lop_y, c);
+    fe_neg  (t3, t2);
+    fe_ccopy(t2, t3, a^b);
+    ge_precomp low_order_point;
+    fe_add(low_order_point.Yp, t2, t1);
+    fe_sub(low_order_point.Ym, t2, t1);
+    fe_mul(low_order_point.T2, t2, t1);
+    fe_mul(low_order_point.T2, low_order_point.T2, D2);
+
+    // Add low order point to the public key
+    ge_madd(&pk, &pk, &low_order_point, t1, t2);
+
+    // Convert to Montgomery u coordinate (we ignore the sign)
+    fe_add(t1, pk.Z, pk.Y);
+    fe_sub(t2, pk.Z, pk.Y);
+    fe_invert(t2, t2);
+    fe_mul(t1, t1, t2);
+
+    fe_tobytes(public_key, t1);
+
+    WIPE_BUFFER(t1);  WIPE_BUFFER(scalar);
+    WIPE_BUFFER(t2);  WIPE_CTX(&pk);
+    WIPE_BUFFER(t3);  WIPE_CTX(&low_order_point);
+}
+
+///////////////////
+/// Elligator 2 ///
+///////////////////
+static const fe A = {486662};
+
+// Elligator direct map
+//
+// Computes the point corresponding to a representative, encoded in 32
+// bytes (little Endian).  Since positive representatives fits in 254
+// bits, The two most significant bits are ignored.
+//
+// From the paper:
+// w = -A / (fe(1) + non_square * r^2)
+// e = chi(w^3 + A*w^2 + w)
+// u = e*w - (fe(1)-e)*(A//2)
+// v = -e * sqrt(u^3 + A*u^2 + u)
+//
+// We ignore v because we don't need it for X25519 (the Montgomery
+// ladder only uses u).
+//
+// Note that e is either 0, 1 or -1
+// if e = 0    u = 0  and v = 0
+// if e = 1    u = w
+// if e = -1   u = -w - A = w * non_square * r^2
+//
+// Let r1 = non_square * r^2
+// Let r2 = 1 + r1
+// Note that r2 cannot be zero, -1/non_square is not a square.
+// We can (tediously) verify that:
+//   w^3 + A*w^2 + w = (A^2*r1 - r2^2) * A / r2^3
+// Therefore:
+//   chi(w^3 + A*w^2 + w) = chi((A^2*r1 - r2^2) * (A / r2^3))
+//   chi(w^3 + A*w^2 + w) = chi((A^2*r1 - r2^2) * (A / r2^3)) * 1
+//   chi(w^3 + A*w^2 + w) = chi((A^2*r1 - r2^2) * (A / r2^3)) * chi(r2^6)
+//   chi(w^3 + A*w^2 + w) = chi((A^2*r1 - r2^2) * (A / r2^3)  *     r2^6)
+//   chi(w^3 + A*w^2 + w) = chi((A^2*r1 - r2^2) *  A * r2^3)
+// Corollary:
+//   e =  1 if (A^2*r1 - r2^2) *  A * r2^3) is a non-zero square
+//   e = -1 if (A^2*r1 - r2^2) *  A * r2^3) is not a square
+//   Note that w^3 + A*w^2 + w (and therefore e) can never be zero:
+//     w^3 + A*w^2 + w = w * (w^2 + A*w + 1)
+//     w^3 + A*w^2 + w = w * (w^2 + A*w + A^2/4 - A^2/4 + 1)
+//     w^3 + A*w^2 + w = w * (w + A/2)^2        - A^2/4 + 1)
+//     which is zero only if:
+//       w = 0                   (impossible)
+//       (w + A/2)^2 = A^2/4 - 1 (impossible, because A^2/4-1 is not a square)
+//
+// Let isr   = invsqrt((A^2*r1 - r2^2) *  A * r2^3)
+//     isr   = sqrt(1        / ((A^2*r1 - r2^2) *  A * r2^3)) if e =  1
+//     isr   = strt(sqrt(-1) / ((A^2*r1 - r2^2) *  A * r2^3)) if e = -1
+//
+// if e = 1
+//   let u1 = -A * (A^2*r1 - r2^2) * A * r2^2 * isr^2
+//       u1 = w
+//       u1 = u
+//
+// if e = -1
+//   let ufactor = -non_square * sqrt(-1) * r^2
+//   let vfactor = sqrt(ufactor)
+//   let u2 = -A * (A^2*r1 - r2^2) * A * r2^2 * isr^2 * ufactor
+//       u2 = w * -1 * -non_square * r^2
+//       u2 = w * non_square * r^2
+//       u2 = u
+void crypto_hidden_to_curve(uint8_t curve[32], const uint8_t hidden[32])
+{
+     // -sqrt(-1) * 2
+    static const fe ufactor={-1917299, 15887451, -18755900, -7000830, -24778944,
+                             544946, -16816446, 4011309, -653372, 10741468,};
+    static const fe A2 = {12721188, 3529,};
+
+    // Representatives are encoded in 254 bits.
+    // The two most significant ones are random padding that must be ignored.
+    u8 clamped[32];
+    COPY(clamped, hidden, 32);
+    clamped[31] &= 0x3f;
+
+    fe r, u, t1, t2, t3;
+    fe_frombytes(r, clamped);
+    fe_sq2(t1, r);
+    fe_add(u, t1, fe_one);
+    fe_sq (t2, u);
+    fe_mul(t3, A2, t1);
+    fe_sub(t3, t3, t2);
+    fe_mul(t3, t3, A);
+    fe_mul(t1, t2, u);
+    fe_mul(t1, t3, t1);
+    int is_square = invsqrt(t1, t1);
+    fe_sq(u, r);
+    fe_mul(u, u, ufactor);
+    fe_ccopy(u, fe_one, is_square);
+    fe_sq (t1, t1);
+    fe_mul(u, u, A);
+    fe_mul(u, u, t3);
+    fe_mul(u, u, t2);
+    fe_mul(u, u, t1);
+    fe_neg(u, u);
+    fe_tobytes(curve, u);
+
+    WIPE_BUFFER(t1);  WIPE_BUFFER(r);
+    WIPE_BUFFER(t2);  WIPE_BUFFER(u);
+    WIPE_BUFFER(t3);  WIPE_BUFFER(clamped);
+}
+
+// Elligator inverse map
+//
+// Computes the representative of a point, if possible.  If not, it does
+// nothing and returns -1.  Note that the success of the operation
+// depends only on the point (more precisely its u coordinate).  The
+// tweak parameter is used only upon success
+//
+// The tweak should be a random byte.  Beyond that, its contents are an
+// implementation detail. Currently, the tweak comprises:
+// - Bit  1  : sign of the v coordinate (0 if positive, 1 if negative)
+// - Bit  2-5: not used
+// - Bits 6-7: random padding
+//
+// From the paper:
+// Let sq = -non_square * u * (u+A)
+// if sq is not a square, or u = -A, there is no mapping
+// Assuming there is a mapping:
+//   if v is positive: r = sqrt(-(u+A) / u)
+//   if v is negative: r = sqrt(-u / (u+A))
+//
+// We compute isr = invsqrt(-non_square * u * (u+A))
+// if it wasn't a non-zero square, abort.
+// else, isr = sqrt(-1 / (non_square * u * (u+A))
+//
+// This causes us to abort if u is zero, even though we shouldn't. This
+// never happens in practice, because (i) a random point in the curve has
+// a negligible chance of being zero, and (ii) scalar multiplication with
+// a trimmed scalar *never* yields zero.
+//
+// Since:
+//   isr * (u+A) = sqrt(-1     / (non_square * u * (u+A)) * (u+A)
+//   isr * (u+A) = sqrt(-(u+A) / (non_square * u * (u+A))
+// and:
+//   isr = u = sqrt(-1 / (non_square * u * (u+A)) * u
+//   isr = u = sqrt(-u / (non_square * u * (u+A))
+// Therefore:
+//   if v is positive: r = isr * (u+A)
+//   if v is negative: r = isr * u
+int crypto_curve_to_hidden(u8 hidden[32], const u8 public_key[32], u8 tweak)
+{
+    fe t1, t2, t3;
+    fe_frombytes(t1, public_key);
+
+    fe_add(t2, t1, A);
+    fe_mul(t3, t1, t2);
+    fe_mul_small(t3, t3, -2);
+    int is_square = invsqrt(t3, t3);
+    if (!is_square) {
+        // The only variable time bit.  This ultimately reveals how many
+        // tries it took us to find a representable key.
+        // This does not affect security as long as we try keys at random.
+        WIPE_BUFFER(t1);
+        WIPE_BUFFER(t2);
+        WIPE_BUFFER(t3);
+        return -1;
+    }
+    fe_ccopy(t1, t2, tweak & 1);
+    fe_mul  (t3, t1, t3);
+    fe_add  (t1, t3, t3);
+    fe_neg  (t2, t3);
+    fe_ccopy(t3, t2, fe_isodd(t1));
+    fe_tobytes(hidden, t3);
+
+    // Pad with two random bits
+    hidden[31] |= tweak & 0xc0;
+
+    WIPE_BUFFER(t1);
+    WIPE_BUFFER(t2);
+    WIPE_BUFFER(t3);
+    return 0;
+}
+
+void crypto_hidden_key_pair(u8 hidden[32], u8 secret_key[32], u8 seed[32])
+{
+    u8 pk [32]; // public key
+    u8 buf[64]; // seed + representative
+    COPY(buf + 32, seed, 32);
+    do {
+        crypto_chacha20(buf, 0, 64, buf+32, zero);
+        crypto_x25519_dirty_fast(pk, buf); // or the "small" version
+    } while(crypto_curve_to_hidden(buf+32, pk, buf[32]));
+    // Note that the return value of crypto_curve_to_hidden() is
+    // independent from its tweak parameter.
+    // Therefore, buf[32] is not actually reused.  Either we loop one
+    // more time and buf[32] is used for the new seed, or we succeeded,
+    // and buf[32] becomes the tweak parameter.
+
+    crypto_wipe(seed, 32);
+    COPY(hidden    , buf + 32, 32);
+    COPY(secret_key, buf     , 32);
+    WIPE_BUFFER(buf);
+    WIPE_BUFFER(pk);
 }
 
 ////////////////////
 /// Key exchange ///
 ////////////////////
-int crypto_key_exchange(u8       shared_key[32],
-                        const u8 your_secret_key [32],
-                        const u8 their_public_key[32])
+void crypto_key_exchange(u8       shared_key[32],
+                         const u8 your_secret_key [32],
+                         const u8 their_public_key[32])
 {
-    int status = crypto_x25519(shared_key, your_secret_key, their_public_key);
-    crypto_chacha20_H(shared_key, shared_key, zero);
-    return status;
+    crypto_x25519(shared_key, your_secret_key, their_public_key);
+    crypto_hchacha20(shared_key, shared_key, zero);
+}
+
+///////////////////////
+/// Scalar division ///
+///////////////////////
+static void multiply(u32 p[16], const u32 a[8], const u32 b[8])
+{
+    ZERO(p, 16);
+    FOR (i, 0, 8) {
+        u64 carry = 0;
+        FOR (j, 0, 8) {
+            carry  += p[i+j] + (u64)a[i] * b[j];
+            p[i+j]  = (u32)carry;
+            carry >>= 32;
+        }
+        p[i+8] = (u32)carry;
+    }
+}
+
+// Montgomery reduction.
+// Divides x by (2^256), and reduces the result modulo L
+//
+// Precondition:
+//   x < L * 2^256
+// Constants:
+//   r = 2^256                 (makes division by r trivial)
+//   k = (r * (1/r) - 1) // L  (1/r is computed modulo L   )
+// Algorithm:
+//   s = (x * k) % r
+//   t = x + s*L      (t is always a multiple of r)
+//   u = (t/r) % L    (u is always below 2*L, conditional subtraction is enough)
+static void redc(u32 u[8], u32 x[16])
+{
+    static const u32 k[8]  = { 0x12547e1b, 0xd2b51da3, 0xfdba84ff, 0xb1a206f2,
+                               0xffa36bea, 0x14e75438, 0x6fe91836, 0x9db6c6f2,};
+    static const u32 l[8]  = { 0x5cf5d3ed, 0x5812631a, 0xa2f79cd6, 0x14def9de,
+                               0x00000000, 0x00000000, 0x00000000, 0x10000000,};
+    // s = x * k (modulo 2^256)
+    // This is cheaper than the full multiplication.
+    u32 s[8] = {0};
+    FOR (i, 0, 8) {
+        u64 carry = 0;
+        FOR (j, 0, 8-i) {
+            carry  += s[i+j] + (u64)x[i] * k[j];
+            s[i+j]  = (u32)carry;
+            carry >>= 32;
+        }
+    }
+    u32 t[16];
+    multiply(t, s, l);
+
+    // t = t + x
+    u64 carry = 0;
+    FOR (i, 0, 16) {
+        carry  += (u64)t[i] + x[i];
+        t[i]    = (u32)carry;
+        carry >>= 32;
+    }
+
+    // u = (t / 2^256) % L
+    // Note that t / 2^256 is always below 2*L,
+    // So a constant time conditional subtraction is enough
+    // We work with L directly, in a 2's complement encoding
+    // (-L == ~L + 1)
+    carry = 1;
+    FOR (i, 0, 8) {
+        carry  += (u64)t[i+8] + ~l[i];
+        carry >>= 32;
+    }
+    u32 mask = (u32)-carry; // carry == 0 or 1
+    FOR (i, 0, 8) {
+        carry  += (u64)t[i+8] + (~l[i] & mask);
+        u[i]    = (u32)carry;
+        carry >>= 32;
+    }
+    WIPE_BUFFER(s);
+    WIPE_BUFFER(t);
+}
+
+void crypto_x25519_inverse(u8 blind_salt [32], const u8 private_key[32],
+                           const u8 curve_point[32])
+{
+    static const  u8 Lm2[32] = { // L - 2
+        0xeb, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2,
+        0xde, 0xf9, 0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, };
+    // 1 in Montgomery form
+    u32 m_inv [8] = {0x8d98951d, 0xd6ec3174, 0x737dcf70, 0xc6ef5bf4,
+                     0xfffffffe, 0xffffffff, 0xffffffff, 0x0fffffff,};
+
+    u8 scalar[32];
+    trim_scalar(scalar, private_key);
+
+    // Convert the scalar in Montgomery form
+    // m_scl = scalar * 2^256 (modulo L)
+    u32 m_scl[8];
+    {
+        i64 tmp[64];
+        ZERO(tmp, 32);
+        COPY(tmp+32, scalar, 32);
+        modL(scalar, tmp);
+        load32_le_buf(m_scl, scalar, 8);
+        WIPE_BUFFER(tmp); // Wipe ASAP to save stack space
+    }
+
+    u32 product[16];
+    for (int i = 252; i >= 0; i--) {
+        multiply(product, m_inv, m_inv);
+        redc(m_inv, product);
+        if (scalar_bit(Lm2, i)) {
+            multiply(product, m_inv, m_scl);
+            redc(m_inv, product);
+        }
+    }
+    // Convert the inverse *out* of Montgomery form
+    // scalar = m_inv / 2^256 (modulo L)
+    COPY(product, m_inv, 8);
+    ZERO(product + 8, 8);
+    redc(m_inv, product);
+    store32_le_buf(scalar, m_inv, 8); // the *inverse* of the scalar
+
+    // Clear the cofactor of scalar:
+    //   cleared = scalar * (3*L + 1)       (modulo 8*L)
+    //   cleared = scalar + scalar * 3 * L (modulo 8*L)
+    // Note that (scalar * 3) is reduced modulo 8, so we only need the
+    // first byte.
+    add_xl(scalar, scalar[0] * 3);
+
+    // Recall that 8*L < 2^256. However it is also very close to
+    // 2^255. If we spanned the ladder over 255 bits, random tests
+    // wouldn't catch the off-by-one error.
+    scalarmult(blind_salt, scalar, curve_point, 256);
+
+    WIPE_BUFFER(scalar);   WIPE_BUFFER(m_scl);
+    WIPE_BUFFER(product);  WIPE_BUFFER(m_inv);
 }
 
 ////////////////////////////////
 /// Authenticated encryption ///
 ////////////////////////////////
-static void lock_ad_padding(crypto_lock_ctx *ctx)
+static void lock_auth(u8 mac[16], const u8  auth_key[32],
+                      const u8 *ad         , size_t ad_size,
+                      const u8 *cipher_text, size_t text_size)
 {
-    if (ctx->ad_phase) {
-        ctx->ad_phase = 0;
-        crypto_poly1305_update(&ctx->poly, zero, ALIGN(ctx->ad_size, 16));
-    }
-}
-
-void crypto_lock_init(crypto_lock_ctx *ctx,
-                      const u8 key[32], const u8 nonce[24])
-{
-    u8 auth_key[64]; // "Wasting" the whole Chacha block is faster
-    ctx->ad_phase     = 1;
-    ctx->ad_size      = 0;
-    ctx->message_size = 0;
-    crypto_chacha20_x_init(&ctx->chacha, key, nonce);
-    crypto_chacha20_stream(&ctx->chacha, auth_key, 64);
-    crypto_poly1305_init  (&ctx->poly  , auth_key);
-    WIPE_BUFFER(auth_key);
-}
-
-void crypto_lock_auth_ad(crypto_lock_ctx *ctx, const u8 *msg, size_t msg_size)
-{
-    crypto_poly1305_update(&ctx->poly, msg, msg_size);
-    ctx->ad_size += msg_size;
-}
-
-void crypto_lock_auth_message(crypto_lock_ctx *ctx,
-                              const u8 *cipher_text, size_t text_size)
-{
-    lock_ad_padding(ctx);
-    ctx->message_size += text_size;
-    crypto_poly1305_update(&ctx->poly, cipher_text, text_size);
-}
-
-void crypto_lock_update(crypto_lock_ctx *ctx, u8 *cipher_text,
-                        const u8 *plain_text, size_t text_size)
-{
-    crypto_chacha20_encrypt(&ctx->chacha, cipher_text, plain_text, text_size);
-    crypto_lock_auth_message(ctx, cipher_text, text_size);
-}
-
-void crypto_lock_final(crypto_lock_ctx *ctx, u8 mac[16])
-{
-    lock_ad_padding(ctx);
     u8 sizes[16]; // Not secret, not wiped
-    store64_le(sizes + 0, ctx->ad_size);
-    store64_le(sizes + 8, ctx->message_size);
-    crypto_poly1305_update(&ctx->poly, zero, ALIGN(ctx->message_size, 16));
-    crypto_poly1305_update(&ctx->poly, sizes, 16);
-    crypto_poly1305_final (&ctx->poly, mac);
-    WIPE_CTX(ctx);
+    store64_le(sizes + 0, ad_size);
+    store64_le(sizes + 8, text_size);
+    crypto_poly1305_ctx poly_ctx;           // auto wiped...
+    crypto_poly1305_init  (&poly_ctx, auth_key);
+    crypto_poly1305_update(&poly_ctx, ad         , ad_size);
+    crypto_poly1305_update(&poly_ctx, zero       , ALIGN(ad_size, 16));
+    crypto_poly1305_update(&poly_ctx, cipher_text, text_size);
+    crypto_poly1305_update(&poly_ctx, zero       , ALIGN(text_size, 16));
+    crypto_poly1305_update(&poly_ctx, sizes      , 16);
+    crypto_poly1305_final (&poly_ctx, mac); // ...here
 }
 
-void crypto_unlock_update(crypto_lock_ctx *ctx, u8 *plain_text,
-                          const u8 *cipher_text, size_t text_size)
-{
-    crypto_unlock_auth_message(ctx, cipher_text, text_size);
-    crypto_chacha20_encrypt(&ctx->chacha, plain_text, cipher_text, text_size);
-}
-
-int crypto_unlock_final(crypto_lock_ctx *ctx, const u8 mac[16])
-{
-    u8 real_mac[16];
-    crypto_lock_final(ctx, real_mac);
-    int mismatch = crypto_verify16(real_mac, mac);
-    WIPE_BUFFER(real_mac);
-    return mismatch;
-}
-
-void crypto_lock_aead(u8        mac[16],
-                      u8       *cipher_text,
-                      const u8  key[32],
-                      const u8  nonce[24],
+void crypto_lock_aead(u8 mac[16], u8 *cipher_text,
+                      const u8  key[32], const u8  nonce[24],
                       const u8 *ad        , size_t ad_size,
                       const u8 *plain_text, size_t text_size)
 {
-    crypto_lock_ctx ctx;
-    crypto_lock_init   (&ctx, key, nonce);
-    crypto_lock_auth_ad(&ctx, ad, ad_size);
-    crypto_lock_update (&ctx, cipher_text, plain_text, text_size);
-    crypto_lock_final  (&ctx, mac);
+    u8 sub_key[32];
+    u8 auth_key[64]; // "Wasting" the whole Chacha block is faster
+    crypto_hchacha20(sub_key, key, nonce);
+    crypto_chacha20(auth_key, 0, 64, sub_key, nonce + 16);
+    crypto_chacha20_ctr(cipher_text, plain_text, text_size,
+                        sub_key, nonce + 16, 1);
+    lock_auth(mac, auth_key, ad, ad_size, cipher_text, text_size);
+    WIPE_BUFFER(sub_key);
+    WIPE_BUFFER(auth_key);
 }
 
-int crypto_unlock_aead(u8       *plain_text,
-                       const u8  key[32],
-                       const u8  nonce[24],
+int crypto_unlock_aead(u8 *plain_text, const u8 key[32], const u8 nonce[24],
                        const u8  mac[16],
                        const u8 *ad         , size_t ad_size,
                        const u8 *cipher_text, size_t text_size)
 {
-    crypto_unlock_ctx ctx;
-    crypto_unlock_init        (&ctx, key, nonce);
-    crypto_unlock_auth_ad     (&ctx, ad, ad_size);
-    crypto_unlock_auth_message(&ctx, cipher_text, text_size);
-    crypto_chacha_ctx chacha_ctx = ctx.chacha; // avoid the wiping...
-    if (crypto_unlock_final(&ctx, mac)) {      // ...that occurs here
-        WIPE_CTX(&chacha_ctx);
-        return -1; // reject forgeries before wasting our time decrypting
+    u8 sub_key[32];
+    u8 auth_key[64]; // "Wasting" the whole Chacha block is faster
+    crypto_hchacha20(sub_key, key, nonce);
+    crypto_chacha20(auth_key, 0, 64, sub_key, nonce + 16);
+    u8 real_mac[16];
+    lock_auth(real_mac, auth_key, ad, ad_size, cipher_text, text_size);
+    WIPE_BUFFER(auth_key);
+    if (crypto_verify16(mac, real_mac)) {
+        WIPE_BUFFER(sub_key);
+        WIPE_BUFFER(real_mac);
+        return -1;
     }
-    crypto_chacha20_encrypt(&chacha_ctx, plain_text, cipher_text, text_size);
-    WIPE_CTX(&chacha_ctx);
+    crypto_chacha20_ctr(plain_text, cipher_text, text_size,
+                        sub_key, nonce + 16, 1);
+    WIPE_BUFFER(sub_key);
+    WIPE_BUFFER(real_mac);
     return 0;
 }
 
-void crypto_lock(u8        mac[16],
-                 u8       *cipher_text,
-                 const u8  key[32],
-                 const u8  nonce[24],
+void crypto_lock(u8 mac[16], u8 *cipher_text,
+                 const u8 key[32], const u8 nonce[24],
                  const u8 *plain_text, size_t text_size)
 {
     crypto_lock_aead(mac, cipher_text, key, nonce, 0, 0, plain_text, text_size);
 }
 
-int crypto_unlock(u8       *plain_text,
-                  const u8  key[32],
-                  const u8  nonce[24],
-                  const u8  mac[16],
+int crypto_unlock(u8 *plain_text,
+                  const u8 key[32], const u8 nonce[24], const u8 mac[16],
                   const u8 *cipher_text, size_t text_size)
 {
     return crypto_unlock_aead(plain_text, key, nonce, mac, 0, 0,
