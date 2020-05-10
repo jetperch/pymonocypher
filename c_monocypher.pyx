@@ -12,6 +12,17 @@ import secrets
 import warnings
 
 
+# also edit setup.py
+__version__ = '3.1.0.0'   # also change setup.py
+__title__ = 'pymonocypher'
+__description__ = 'Python ctypes bindings to the Monocypher library'
+__url__ = 'https://github.com/jetperch/pymonocypher'
+__author__ = 'Jetperch LLC'
+__author_email__ = 'joulescope-dev@jetperch.com'
+__license__ = 'BSD 2-clause'
+__copyright__ = 'Copyright 2018-2020 Jetperch LLC'
+
+
 cdef extern from "monocypher.h":
 
     # Vtable for EdDSA with a custom hash.
@@ -43,34 +54,17 @@ cdef extern from "monocypher.h":
         size_t   input_idx
         size_t   hash_size
 
-    ctypedef struct crypto_sign_ctx:
-        crypto_blake2b_ctx hash
-        uint8_t buf[96]
-        uint8_t pk [32]
-
-    ctypedef struct crypto_check_ctx:
-        crypto_blake2b_ctx hash
-        uint8_t sig[64]
-        uint8_t pk [32]
-
     # Signatures (EdDSA)
     ctypedef struct crypto_sign_ctx_abstract:
         const crypto_sign_vtable *hash;
         uint8_t buf[96];
         uint8_t pk [32];
-
-    ctypedef struct  crypto_check_ctx_abstract:
-        const crypto_sign_vtable *hash;
-        uint8_t buf[96];
-        uint8_t pk [32];
+    ctypedef crypto_sign_ctx_abstract crypto_check_ctx_abstract
 
     ctypedef struct crypto_sign_ctx:
         crypto_sign_ctx_abstract ctx;
         crypto_blake2b_ctx       hash;
-
-    ctypedef struct crypto_check_ctx:
-        crypto_sign_ctx_abstract ctx;
-        crypto_blake2b_ctx       hash;
+    ctypedef crypto_sign_ctx crypto_check_ctx
 
     # ////////////////////////////
     # /// High level interface ///
@@ -367,60 +361,6 @@ def unlock(key, nonce, mac, message, associated_data=None):
     if 0 != rv:
         return None
     return plain_text
-
-
-# todo remove
-#cdef class Encrypt:
-#    cdef crypto_lock_ctx _ctx
-#
-#    """Incrementally encrypt a message with authentication.
-#
-#    :param key: The 32-byte symmetric key.
-#    :param nonce: The 24-byte nonce.
-#    :param associated_data: The optional associated data for AEAD.
-#    """
-#    def __cinit__(self, key, nonce, associated_data=None):
-#        associated_data = b'' if associated_data is None else associated_data
-#        crypto_lock_init(&self._ctx, key, nonce)
-#        if associated_data and len(associated_data):
-#            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
-#
-#    def update(self, message):
-#        """Add new data to the payload.
-#
-#        :param message: Additional data.
-#        :return: The encrypted data.
-#        """
-#        crypto_text = bytes(len(message))
-#        crypto_lock_update(&self._ctx, crypto_text, message, len(message))
-#        return crypto_text
-#
-#    def finalize(self):
-#        """Finalize the authenticated encryption.
-#
-#        :return: The 16-byte message authentication code (MAC).
-#        """
-#        mac = bytes(16)
-#        crypto_lock_final(&self._ctx, mac)
-#        return mac
-
-
-# todo remove
-#cdef class Decrypt:
-#    cdef crypto_lock_ctx _ctx
-#
-#    def __init__(self, key, nonce, associated_data=None):
-#        crypto_lock_init(&self._ctx, key, nonce)
-#        if associated_data and len(associated_data):
-#            crypto_lock_auth_ad(&self._ctx, associated_data, len(associated_data))
-#
-#    def update(self, message):
-#        plain_text = bytes(len(message))
-#        crypto_unlock_update(&self._ctx, plain_text, message, len(message))
-#        return plain_text
-#
-#    def finalize(self, mac):
-#        return crypto_unlock_final(&self._ctx, mac)
 
 
 def chacha20(key, nonce, message):

@@ -4,11 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
-## 0.1.5
+## 3.1.0.0
 
-2020 May 7
+2020 May 10
 
 *   Upgraded to Monocypher 3.1.0.
+*   Removed deprecated incremental encryption interface.
+*   Changed versioning to match monocypher.
+*   Added package metadata.
 
 
 ## 0.1.4
