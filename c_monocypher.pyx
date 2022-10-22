@@ -591,6 +591,11 @@ def generate_signing_key_pair():
     """Generate a new keypair for signing using default settings.
 
     :return (secret, public).
+
+    To print a key, use the following code snippet:
+
+        import binascii
+        print(binascii.hexlify(key))
     """
     secret = generate_key()
     public = compute_signing_public_key(secret)

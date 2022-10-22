@@ -4,6 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 3.1.3.0
+
+2022 Oct 22
+
+* Upgraded to Monocypher 3.1.3.
+* Removed print generated keys to stdout.
+
+
 ## 3.1.0.0
 
 2020 May 10
@@ -29,7 +37,7 @@ This file contains the list of changes made to pymonocypher.
     Use new functions generate_signing_key_pair and compute_signing_public_key
     for signing.  Use new functions compute_key_exchange_public_key and
     generate_key_exchange_key_pair for key exchange.
-*   Deprecated generate_key_pair and public_key_compute which call
+*   Deprecated generate_key_pair and public_key_compute which
     call generate_signing_key_pair and compute_signing_public_key,
     respectively.
 
