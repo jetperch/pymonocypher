@@ -13,14 +13,14 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '3.1.0.0'   # also change setup.py
+__version__ = '3.1.3.1'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
 __author__ = 'Jetperch LLC'
 __author_email__ = 'joulescope-dev@jetperch.com'
 __license__ = 'BSD 2-clause'
-__copyright__ = 'Copyright 2018-2020 Jetperch LLC'
+__copyright__ = 'Copyright 2018-2022 Jetperch LLC'
 
 
 cdef extern from "monocypher.h":

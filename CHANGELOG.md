@@ -4,6 +4,13 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 3.1.3.1
+
+2022 Nov 30
+
+* Fixed build dependencies.
+
+
 ## 3.1.3.0
 
 2022 Oct 22

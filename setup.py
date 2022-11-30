@@ -11,7 +11,7 @@ import setuptools
 import os
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
-VERSION = '3.1.3.0'  # also change c_monocypher.pyx
+VERSION = '3.1.3.1'  # also change c_monocypher.pyx
 
 
 try:
@@ -74,10 +74,7 @@ setuptools.setup(
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
-    install_requires = [],
-    extras_require={
-        'dev': ['check-manifest', 'Cython', 'coverage'],
-    },
+    install_requires=[],
     ext_modules=extensions,
 
     project_urls={
