@@ -4,6 +4,13 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 3.1.3.2
+
+2023 Mar 27
+
+* Added Elligator bindings using monocypher 4.x naming.
+
+
 ## 3.1.3.1
 
 2022 Nov 30

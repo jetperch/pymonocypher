@@ -10,6 +10,7 @@ import binascii
 import os
 import json
 import warnings
+import secrets
 
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
@@ -115,3 +116,28 @@ class TestMonocypher(unittest.TestCase):
             monocypher.generate_key_pair()
         self.assertEqual(1, len(w))
         self.assertIn('deprecated', str(w[0].message))
+
+    def test_elligator(self):
+        hidden1, secret = monocypher.elligator_key_pair()
+        curve1 = monocypher.elligator_map(hidden1)
+        while True:
+            try:
+                hidden2 = monocypher.elligator_rev(curve1)
+                break
+            except ValueError:
+                pass
+        curve2 = monocypher.elligator_map(hidden2)
+        self.assertEqual(curve1, curve2)
+
+    def test_elligator_explicit_rand(self):
+        seed = secrets.token_bytes(32)
+        hidden1, secret = monocypher.elligator_key_pair(seed)
+        curve1 = monocypher.elligator_map(hidden1)
+        while True:
+            try:
+                hidden2 = monocypher.elligator_rev(curve1, secrets.token_bytes(1)[0])
+                break
+            except ValueError:
+                pass
+        curve2 = monocypher.elligator_map(hidden2)
+        self.assertEqual(curve1, curve2)
