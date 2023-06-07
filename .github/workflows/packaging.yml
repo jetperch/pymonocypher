@@ -76,9 +76,7 @@ jobs:
   build_wheels:
     name: Build on ${{ matrix.os }}
     needs:
-      - build_native_win
-      - build_native_posix
-      - build_python_sdist
+      - build_sdist
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
