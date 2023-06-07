@@ -615,3 +615,63 @@ def generate_key_exchange_key_pair():
     secret = generate_key()
     public = compute_key_exchange_public_key(secret)
     return secret, public
+
+
+## Elligator bindings
+
+
+def elligator_map(hidden: bytes) -> bytes:
+    """Computes the point corresponding to a representative.
+
+    :param hidden: The 32 byte hidden key.
+    :return: The 32-byte little-endian encoded public key.
+        Since positive representatives fits in 254 bits,
+        the two most significant bits are ignored.
+    """
+    curve = bytes(32)
+    if len(hidden) != 32:
+        raise ValueError(f'Invalid hidden length {len(hidden)} != 32')
+    crypto_hidden_to_curve(curve, hidden)
+    return curve
+
+
+def elligator_rev(curve: bytes, tweak=None) -> bytes:
+    """Computes the representative of a point.
+
+    :param curve: The 32-byte little-endian encoded public key.
+    :param tweak: The optional random byte.  If None (default),
+        then automatically generate a random byte.
+    :return: The 32-byte secret key
+    :raise ValueError: If the combination of curve point and tweak
+        is unsuitable for hiding.  Choose another curve point
+        and try again.
+    """
+    hidden = bytes(32)
+    if len(curve) != 32:
+        raise ValueError(f'Invalid curve length {len(curve)} != 32')
+    if tweak is None:
+        tweak = secrets.randbits(8)
+    rv = crypto_curve_to_hidden(hidden, curve, tweak)
+    if rv:
+        raise ValueError('curve point is unsuitable for hiding')
+    return hidden
+
+
+def elligator_key_pair(seed: bytes = None) -> tuple[bytes, bytes]:
+    """Generate a key pair.
+
+    :param seed: The 32-byte seed that is used to derive the key pair.
+        None (default) generate a cryptographically secure random seed.
+    :return: The tuple of hidden and secret_key.
+        * hidden: The 32-byte little ending encoding of a point on the curve
+          which is effectively indistinguishable from random.
+        * secret_key: The generated 32-byte little endian secret key.
+    """
+    hidden = bytes(32)
+    secret_key = bytes(32)
+    if seed is None:
+        seed = secrets.token_bytes(32)
+    elif len(seed) != 32:
+        raise ValueError(f'Invalid seed length {len(seed)} != 32')
+    crypto_hidden_key_pair(hidden, secret_key, seed)
+    return hidden, secret_key
