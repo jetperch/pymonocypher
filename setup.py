@@ -11,7 +11,7 @@ import setuptools
 import os
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
-VERSION = '3.1.3.1'  # also change c_monocypher.pyx
+VERSION = '3.1.3.2'  # also change c_monocypher.pyx
 
 
 try:
@@ -66,16 +66,16 @@ setuptools.setup(
         'Topic :: Security :: Cryptography',
 
         # Supported Python versions
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'Programming Language :: C',
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
     install_requires=[],
     ext_modules=extensions,
+    python_requires='~=3.9',
 
     project_urls={
         'Bug Reports': 'https://github.com/jetperch/pymonocypher/issues',

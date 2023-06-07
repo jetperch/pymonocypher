@@ -4,6 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 3.1.3.2
+
+2023 Jun 7
+
+* Migrated to GitHub Actions build & release process.
+* Bumped minimum python version from 3.6 to 3.9.
+
+
 ## 3.1.3.1
 
 2022 Nov 30
