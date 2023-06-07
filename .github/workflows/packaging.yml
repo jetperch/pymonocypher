@@ -108,7 +108,7 @@ jobs:
           # skip musllinux: build takes too long with default os images.
           CIBW_SKIP: 'pp* *musllinux*'
           CIBW_TEST_REQUIRES: pytest
-          CIBW_TEST_COMMAND: pytest
+          CIBW_TEST_COMMAND: pytest {project}/test
         with:
           package-dir: ${{ steps.find_sdist_filename.outputs.filename }}
 
