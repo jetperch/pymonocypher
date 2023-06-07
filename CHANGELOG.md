@@ -6,8 +6,10 @@ This file contains the list of changes made to pymonocypher.
 
 ## 3.1.3.2
 
-2023 Mar 27
+2023 Jun 7
 
+* Migrated to GitHub Actions build & release process.
+* Bumped minimum python version from 3.6 to 3.9.
 * Added Elligator bindings using monocypher 4.x naming.
 
 
