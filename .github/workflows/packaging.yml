@@ -84,9 +84,6 @@ jobs:
         os: ["ubuntu-latest", "windows-latest", "macos-latest"]
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
       - name: Download sdist
         uses: actions/download-artifact@v3
         with:
