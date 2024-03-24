@@ -13,7 +13,7 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '3.1.3.2'   # also change setup.py
+__version__ = '4.0.2.1'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
@@ -25,289 +25,133 @@ __copyright__ = 'Copyright 2018-2022 Jetperch LLC'
 
 cdef extern from "monocypher.h":
 
-    # Vtable for EdDSA with a custom hash.
-    # Instantiate it to define a custom hash.
-    # Its size, contents, and layout, are part of the public API.
-    ctypedef struct crypto_sign_vtable:
-        void (*hash)(uint8_t hash[64], const uint8_t *message, size_t message_size);
-        void (*init  )(void *ctx);
-        void (*update)(void *ctx, const uint8_t *message, size_t message_size);
-        void (*final )(void *ctx, uint8_t hash[64]);
-        size_t ctx_size;
+    cpdef int crypto_verify16(const uint8_t a[16], const uint8_t b[16])
 
-    # Do not rely on the size or contents of any of the types below,
-    # they may change without notice.
+    cpdef int crypto_verify32(const uint8_t a[32], const uint8_t b[32])
 
-    # Poly1305
-    ctypedef struct crypto_poly1305_ctx:
-        uint32_t r[4]   # constant multiplier (from the secret key)
-        uint32_t h[5]   # accumulated hash
-        uint32_t c[5]   # chunk of the message
-        uint32_t pad[4] # random number added at the end (from the secret key)
-        size_t   c_idx  # How many bytes are there in the chunk.
+    cpdef int crypto_verify64(const uint8_t a[64], const uint8_t b[64])
 
-    # Hash (Blake2b)
+    void crypto_wipe(uint8_t* secret, size_t size)
+
+    void crypto_aead_lock(uint8_t* cipher_text, uint8_t mac[16], const uint8_t key[32], const uint8_t nonce[24], const uint8_t* ad, size_t ad_size, const uint8_t* plain_text, size_t text_size)
+
+    int crypto_aead_unlock(uint8_t* plain_text, const uint8_t mac[16], const uint8_t key[32], const uint8_t nonce[24], const uint8_t* ad, size_t ad_size, const uint8_t* cipher_text, size_t text_size)
+
+    ctypedef struct crypto_aead_ctx:
+        uint64_t counter
+        uint8_t key[32]
+        uint8_t nonce[8]
+
+    void crypto_aead_init_x(crypto_aead_ctx* ctx, const uint8_t key[32], const uint8_t nonce[24])
+
+    void crypto_aead_init_djb(crypto_aead_ctx* ctx, const uint8_t key[32], const uint8_t nonce[8])
+
+    void crypto_aead_init_ietf(crypto_aead_ctx* ctx, const uint8_t key[32], const uint8_t nonce[12])
+
+    void crypto_aead_write(crypto_aead_ctx* ctx, uint8_t* cipher_text, uint8_t mac[16], const uint8_t* ad, size_t ad_size, const uint8_t* plain_text, size_t text_size)
+
+    int crypto_aead_read(crypto_aead_ctx* ctx, uint8_t* plain_text, const uint8_t mac[16], const uint8_t* ad, size_t ad_size, const uint8_t* cipher_text, size_t text_size)
+
+    void crypto_blake2b(uint8_t* hash, size_t hash_size, const uint8_t* message, size_t message_size)
+
+    void crypto_blake2b_keyed(uint8_t* hash, size_t hash_size, const uint8_t* key, size_t key_size, const uint8_t* message, size_t message_size)
+
     ctypedef struct crypto_blake2b_ctx:
         uint64_t hash[8]
         uint64_t input_offset[2]
         uint64_t input[16]
-        size_t   input_idx
-        size_t   hash_size
+        size_t input_idx
+        size_t hash_size
 
-    # Signatures (EdDSA)
-    ctypedef struct crypto_sign_ctx_abstract:
-        const crypto_sign_vtable *hash;
-        uint8_t buf[96];
-        uint8_t pk [32];
-    ctypedef crypto_sign_ctx_abstract crypto_check_ctx_abstract
+    void crypto_blake2b_init(crypto_blake2b_ctx* ctx, size_t hash_size)
 
-    ctypedef struct crypto_sign_ctx:
-        crypto_sign_ctx_abstract ctx;
-        crypto_blake2b_ctx       hash;
-    ctypedef crypto_sign_ctx crypto_check_ctx
+    void crypto_blake2b_keyed_init(crypto_blake2b_ctx* ctx, size_t hash_size, const uint8_t* key, size_t key_size)
 
-    # ////////////////////////////
-    # /// High level interface ///
-    # ////////////////////////////
+    void crypto_blake2b_update(crypto_blake2b_ctx* ctx, const uint8_t* message, size_t message_size)
 
-    # Constant time comparisons
-    # -------------------------
+    void crypto_blake2b_final(crypto_blake2b_ctx* ctx, uint8_t* hash)
 
-    # Return 0 if a and b are equal, -1 otherwise
-    cpdef int crypto_verify16(const uint8_t a[16], const uint8_t b[16])
-    cpdef int crypto_verify32(const uint8_t a[32], const uint8_t b[32])
-    cpdef int crypto_verify64(const uint8_t a[64], const uint8_t b[64])
+    ctypedef struct crypto_argon2_config:
+        uint32_t algorithm
+        uint32_t nb_blocks
+        uint32_t nb_passes
+        uint32_t nb_lanes
 
-    # Erase sensitive data
-    # --------------------
+    ctypedef struct crypto_argon2_inputs:
+        const uint8_t* pass_ "pass"
+        const uint8_t* salt
+        uint32_t pass_size
+        uint32_t salt_size
 
-    # Please erase all copies
-    void crypto_wipe(uint8_t *secret, size_t size)
+    ctypedef struct crypto_argon2_extras:
+        const uint8_t* key
+        const uint8_t* ad
+        uint32_t key_size
+        uint32_t ad_size
 
+    const crypto_argon2_extras crypto_argon2_no_extras
 
-    # Authenticated encryption
-    # ------------------------
+    void crypto_argon2(uint8_t* hash, uint32_t hash_size, void* work_area, crypto_argon2_config config, crypto_argon2_inputs inputs, crypto_argon2_extras extras)
 
-    # Direct interface
-    void crypto_lock(uint8_t        mac[16],
-                     uint8_t       *cipher_text,
-                     const uint8_t  key[32],
-                     const uint8_t  nonce[24],
-                     const uint8_t *plain_text, size_t text_size)
-    int crypto_unlock(uint8_t       *plain_text,
-                      const uint8_t  key[32],
-                      const uint8_t  nonce[24],
-                      const uint8_t  mac[16],
-                      const uint8_t *cipher_text, size_t text_size)
+    void crypto_x25519_public_key(uint8_t public_key[32], const uint8_t secret_key[32])
 
-    # Direct interface with additional data
-    void crypto_lock_aead(uint8_t        mac[16],
-                          uint8_t       *cipher_text,
-                          const uint8_t  key[32],
-                          const uint8_t  nonce[24],
-                          const uint8_t *ad        , size_t ad_size,
-                          const uint8_t *plain_text, size_t text_size)
-    int crypto_unlock_aead(uint8_t       *plain_text,
-                           const uint8_t  key[32],
-                           const uint8_t  nonce[24],
-                           const uint8_t  mac[16],
-                           const uint8_t *ad         , size_t ad_size,
-                           const uint8_t *cipher_text, size_t text_size)
+    void crypto_x25519(uint8_t raw_shared_secret[32], const uint8_t your_secret_key[32], const uint8_t their_public_key[32])
 
-    # General purpose hash (Blake2b)
-    # ------------------------------
+    void crypto_x25519_to_eddsa(uint8_t eddsa[32], const uint8_t x25519[32])
 
-    # Direct interface
-    void crypto_blake2b(uint8_t hash[64],
-                        const uint8_t *message, size_t message_size)
+    void crypto_x25519_inverse(uint8_t blind_salt[32], const uint8_t private_key[32], const uint8_t curve_point[32])
 
-    void crypto_blake2b_general(uint8_t       *hash    , size_t hash_size,
-                                const uint8_t *key     , size_t key_size, # optional
-                                const uint8_t *message , size_t message_size)
-
-    # Incremental interface
-    void crypto_blake2b_init  (crypto_blake2b_ctx *ctx)
-    void crypto_blake2b_update(crypto_blake2b_ctx *ctx,
-                               const uint8_t *message, size_t message_size)
-    void crypto_blake2b_final (crypto_blake2b_ctx *ctx, uint8_t *hash)
-
-    void crypto_blake2b_general_init(crypto_blake2b_ctx *ctx, size_t hash_size,
-                                     const uint8_t      *key, size_t key_size)
-
-    # vtable for signatures
-    cdef extern crypto_sign_vtable crypto_blake2b_vtable;
-
-    # Password key derivation (Argon2 i)
-    # ----------------------------------
-    void crypto_argon2i(uint8_t       *hash,      uint32_t hash_size,     # >= 4
-                        void          *work_area, uint32_t nb_blocks,     # >= 8
-                        uint32_t       nb_iterations,                     # >= 1
-                        const uint8_t *password,  uint32_t password_size,
-                        const uint8_t *salt,      uint32_t salt_size)
-
-    void crypto_argon2i_general(uint8_t       *hash,      uint32_t hash_size, # >= 4
-                                void          *work_area, uint32_t nb_blocks, # >= 8
-                                uint32_t       nb_iterations,                # >= 1
-                                const uint8_t *password,  uint32_t password_size,
-                                const uint8_t *salt,      uint32_t salt_size,# >= 8
-                                const uint8_t *key,       uint32_t key_size,
-                                const uint8_t *ad,        uint32_t ad_size)
-
-
-    # Key exchange (x25519 + HChacha20)
-    # ---------------------------------
-    #define crypto_key_exchange_public_key crypto_x25519_public_key
-    void crypto_key_exchange(uint8_t       shared_key      [32],
-                            const uint8_t your_secret_key [32],
-                            const uint8_t their_public_key[32])
-
-
-    # Signatures (EdDSA with curve25519 + Blake2b)
-    # --------------------------------------------
-
-    # Generate public key
-    cpdef void crypto_sign_public_key(uint8_t        public_key[32],
-                                      const uint8_t  secret_key[32])
-
-    # Direct interface
-    void crypto_sign(uint8_t        signature [64],
-                     const uint8_t  secret_key[32],
-                     const uint8_t  public_key[32], # optional, may be 0
-                     const uint8_t *message, size_t message_size)
-    int crypto_check(const uint8_t  signature [64],
-                     const uint8_t  public_key[32],
-                     const uint8_t *message, size_t message_size)
-
-    # Incremental interface for signatures (2 passes)
-    void crypto_sign_init_first_pass(crypto_sign_ctx_abstract *ctx,
-                                     const uint8_t  secret_key[32],
-                                     const uint8_t  public_key[32])
-    void crypto_sign_update(crypto_sign_ctx_abstract *ctx,
-                            const uint8_t *message, size_t message_size)
-    void crypto_sign_init_second_pass(crypto_sign_ctx_abstract *ctx)
-    # use crypto_sign_update() again.
-    void crypto_sign_final(crypto_sign_ctx_abstract *ctx, uint8_t signature[64])
-
-    # Incremental interface for verification (1 pass)
-    void crypto_check_init  (crypto_sign_ctx_abstract *ctx,
-                             const uint8_t signature[64],
-                             const uint8_t public_key[32])
-    void crypto_check_update(crypto_sign_ctx_abstract *ctx,
-                             const uint8_t *message, size_t message_size)
-    int crypto_check_final  (crypto_sign_ctx_abstract *ctx)
-
-    # Custom hash interface
-    void crypto_sign_public_key_custom_hash(uint8_t       public_key[32],
-                                            const uint8_t secret_key[32],
-                                            const crypto_sign_vtable *hash)
-    void crypto_sign_init_first_pass_custom_hash(crypto_sign_ctx_abstract *ctx,
-                                                 const uint8_t secret_key[32],
-                                                 const uint8_t public_key[32],
-                                                 const crypto_sign_vtable *hash)
-    void crypto_check_init_custom_hash(crypto_check_ctx_abstract *ctx,
-                                       const uint8_t signature[64],
-                                       const uint8_t public_key[32],
-                                       const crypto_sign_vtable *hash)
-
-    # EdDSA to X25519
-    # ---------------
-    void crypto_from_eddsa_private(uint8_t x25519[32], const uint8_t eddsa[32])
-    void crypto_from_eddsa_public (uint8_t x25519[32], const uint8_t eddsa[32])
-    
-    # Elligator 2
-    # -----------
-    
-    # Elligator mappings proper
-    void crypto_hidden_to_curve(uint8_t curve [32], const uint8_t hidden[32])
-    int  crypto_curve_to_hidden(uint8_t hidden[32], const uint8_t curve [32],
-                                uint8_t tweak)
-    
-    # Easy to use key pair generation
-    void crypto_hidden_key_pair(uint8_t hidden[32], uint8_t secret_key[32],
-                                uint8_t seed[32])
-
-    # ////////////////////////////
-    # /// Low level primitives ///
-    # ////////////////////////////
-
-    # For experts only.  You have been warned.
-
-
-    # Chacha20
-    # --------
-
-    # Specialised hash.
-    void crypto_hchacha20(uint8_t       out[32],
-                          const uint8_t key[32],
-                          const uint8_t in_ [16])
-
-    void crypto_chacha20(uint8_t       *cipher_text,
-                         const uint8_t *plain_text,
-                         size_t         text_size,
-                         const uint8_t  key[32],
-                         const uint8_t  nonce[8])
-    void crypto_xchacha20(uint8_t       *cipher_text,
-                          const uint8_t *plain_text,
-                          size_t         text_size,
-                          const uint8_t  key[32],
-                          const uint8_t  nonce[24])
-    void crypto_ietf_chacha20(uint8_t       *cipher_text,
-                              const uint8_t *plain_text,
-                              size_t         text_size,
-                              const uint8_t  key[32],
-                              const uint8_t  nonce[12])
-    uint64_t crypto_chacha20_ctr(uint8_t       *cipher_text,
-                                 const uint8_t *plain_text,
-                                 size_t         text_size,
-                                 const uint8_t  key[32],
-                                 const uint8_t  nonce[8],
-                                 uint64_t       ctr)
-    uint64_t crypto_xchacha20_ctr(uint8_t       *cipher_text,
-                                  const uint8_t *plain_text,
-                                  size_t         text_size,
-                                  const uint8_t  key[32],
-                                  const uint8_t  nonce[24],
-                                  uint64_t       ctr)
-    uint32_t crypto_ietf_chacha20_ctr(uint8_t       *cipher_text,
-                                      const uint8_t *plain_text,
-                                      size_t         text_size,
-                                      const uint8_t  key[32],
-                                      const uint8_t  nonce[12],
-                                      uint32_t       ctr)
-
-    # Poly 1305
-    # ---------
-
-    # Direct interface
-    void crypto_poly1305(uint8_t        mac[16],
-                         const uint8_t *message, size_t message_size,
-                         const uint8_t  key[32])
-
-    # Incremental interface
-    void crypto_poly1305_init  (crypto_poly1305_ctx *ctx, const uint8_t key[32])
-    void crypto_poly1305_update(crypto_poly1305_ctx *ctx,
-                                const uint8_t *message, size_t message_size)
-    void crypto_poly1305_final (crypto_poly1305_ctx *ctx, uint8_t mac[16])
-
-
-    # X-25519
-    # -------
-    void crypto_x25519_public_key(uint8_t       public_key[32],
-                                  const uint8_t secret_key[32])
-    void crypto_x25519(uint8_t       raw_shared_secret[32],
-                      const uint8_t your_secret_key  [32],
-                      const uint8_t their_public_key [32])
-
-    # "Dirty" versions of x25519_public_key()
-    # Only use to generate ephemeral keys you want to hide.
     void crypto_x25519_dirty_small(uint8_t pk[32], const uint8_t sk[32])
-    void crypto_x25519_dirty_fast (uint8_t pk[32], const uint8_t sk[32])
-    
-    # scalar division
-    # ---------------
-    void crypto_x25519_inverse(uint8_t       blind_salt [32],
-                               const uint8_t private_key[32],
-                               const uint8_t curve_point[32])
+
+    void crypto_x25519_dirty_fast(uint8_t pk[32], const uint8_t sk[32])
+
+    void crypto_eddsa_key_pair(uint8_t secret_key[64], uint8_t public_key[32], uint8_t seed[32])
+
+    void crypto_eddsa_sign(uint8_t signature[64], const uint8_t secret_key[64], const uint8_t* message, size_t message_size)
+
+    int crypto_eddsa_check(const uint8_t signature[64], const uint8_t public_key[32], const uint8_t* message, size_t message_size)
+
+    void crypto_eddsa_to_x25519(uint8_t x25519[32], const uint8_t eddsa[32])
+
+    void crypto_eddsa_trim_scalar(uint8_t out[32], const uint8_t in_[32])
+
+    void crypto_eddsa_reduce(uint8_t reduced[32], const uint8_t expanded[64])
+
+    void crypto_eddsa_mul_add(uint8_t r[32], const uint8_t a[32], const uint8_t b[32], const uint8_t c[32])
+
+    void crypto_eddsa_scalarbase(uint8_t point[32], const uint8_t scalar[32])
+
+    int crypto_eddsa_check_equation(const uint8_t signature[64], const uint8_t public_key[32], const uint8_t h_ram[32])
+
+    void crypto_chacha20_h(uint8_t out[32], const uint8_t key[32], const uint8_t in_[16])
+
+    uint64_t crypto_chacha20_djb(uint8_t* cipher_text, const uint8_t* plain_text, size_t text_size, const uint8_t key[32], const uint8_t nonce[8], uint64_t ctr)
+
+    uint32_t crypto_chacha20_ietf(uint8_t* cipher_text, const uint8_t* plain_text, size_t text_size, const uint8_t key[32], const uint8_t nonce[12], uint32_t ctr)
+
+    uint64_t crypto_chacha20_x(uint8_t* cipher_text, const uint8_t* plain_text, size_t text_size, const uint8_t key[32], const uint8_t nonce[24], uint64_t ctr)
+
+    void crypto_poly1305(uint8_t mac[16], const uint8_t* message, size_t message_size, const uint8_t key[32])
+
+    ctypedef struct crypto_poly1305_ctx:
+        uint8_t c[16]
+        size_t c_idx
+        uint32_t r[4]
+        uint32_t pad[4]
+        uint32_t h[5]
+
+    void crypto_poly1305_init(crypto_poly1305_ctx* ctx, const uint8_t key[32])
+
+    void crypto_poly1305_update(crypto_poly1305_ctx* ctx, const uint8_t* message, size_t message_size)
+
+    void crypto_poly1305_final(crypto_poly1305_ctx* ctx, uint8_t mac[16])
+
+    void crypto_elligator_map(uint8_t curve[32], const uint8_t hidden[32])
+
+    int crypto_elligator_rev(uint8_t hidden[32], const uint8_t curve[32], uint8_t tweak)
+
+    void crypto_elligator_key_pair(uint8_t hidden[32], uint8_t secret_key[32], uint8_t seed[32])
+
 
 def wipe(data):
     """Wipe a bytes object from memory.
@@ -334,10 +178,8 @@ def lock(key, nonce, message, associated_data=None):
     """
     mac = bytes(16)
     crypto_text = bytes(len(message))
-    if associated_data is not None:
-        crypto_lock_aead(mac, crypto_text, key, nonce, associated_data, len(associated_data), message, len(message))
-    else:
-        crypto_lock(mac, crypto_text, key, nonce, message, len(message))
+    associated_data = b'' if associated_data is None else associated_data
+    crypto_aead_lock(crypto_text, mac, key, nonce, associated_data, len(associated_data), message, len(message))
     return mac, crypto_text
 
 
@@ -354,10 +196,8 @@ def unlock(key, nonce, mac, message, associated_data=None):
     :return: The secret message or None on authentication failure.
     """
     plain_text = bytearray(len(message))
-    if associated_data is not None:
-        rv = crypto_unlock_aead(plain_text, key, nonce, mac, associated_data, len(associated_data), message, len(message))
-    else:
-        rv = crypto_unlock(plain_text, key, nonce, mac, message, len(message))
+    associated_data = b'' if associated_data is None else associated_data
+    rv = crypto_aead_unlock(plain_text, mac, key, nonce, associated_data, len(associated_data), message, len(message))
     if 0 != rv:
         return None
     return plain_text
@@ -373,9 +213,9 @@ def chacha20(key, nonce, message):
     """
     result = bytes(len(message))
     if 24 == len(nonce):
-        crypto_xchacha20(result, message, len(message), key, nonce)
+        crypto_chacha20_x(result, message, len(message), key, nonce, 0)
     elif 8 == len(nonce):
-        crypto_chacha20(result, message, len(message), key, nonce)
+        crypto_chacha20_djb(result, message, len(message), key, nonce, 0)
         pass
     else:
         raise ValueError('invalid nonce length')
@@ -387,7 +227,7 @@ def blake2b(msg, key=None):
     if isinstance(msg, str):
         msg = msg.encode('utf-8')
     hash = bytes(64)
-    crypto_blake2b_general(hash, len(hash), key, len(key), msg, len(msg))
+    crypto_blake2b_keyed(hash, len(hash), key, len(key), msg, len(msg))
     return hash
 
 
@@ -403,7 +243,7 @@ cdef class Blake2b:
     def __init__(self, key=None, hash_size=None):
         key = b'' if key is None else key
         self._hash_size = 64 if hash_size is None else hash_size
-        crypto_blake2b_general_init(&self._ctx, self._hash_size, key, len(key))
+        crypto_blake2b_keyed_init(&self._ctx, self._hash_size, key, len(key))
 
     def update(self, message):
         """Add new data to the hash.
@@ -425,17 +265,29 @@ cdef class Blake2b:
 def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None):
     key = b'' if key is None else key
     ad = b'' if ad is None else ad
+
+    cdef crypto_argon2_config config;
+    config.algorithm = 1
+    config.nb_block = nb_blocks
+    config.nb_passes = nb_iterations
+    config.nb_lanes = 1
+
+    cdef crypto_argon2_inputs inputs;
+    inputs.pass_ = password
+    inputs.pass_size = len(password)
+    inputs.salt = salt
+    inputs.salt_size = len(salt)
+
+    cdef crypto_argon2_extras extras;
+    extras.key = key
+    extras.key_size = len(key)
+    extras.ad = ad
+    extras.ad_size = len(ad)
+
     hash = bytes(32)
     work_area = malloc(nb_blocks * 1024)
     try:
-        crypto_argon2i_general(hash, <uint32_t> len(hash), 
-                               work_area,
-                               <uint32_t> nb_blocks, 
-                               <uint32_t> nb_iterations,
-                               password, <uint32_t> len(password),
-                               salt, <uint32_t> len(salt),
-                               key, <uint32_t> len(key),
-                               ad, <uint32_t> len(ad))
+        crypto_argon2(hash, <uint32_t> len(hash), work_area, config, inputs, extras)
     finally:
         free(work_area)
     crypto_wipe(password, len(password))
@@ -462,7 +314,7 @@ def key_exchange(your_secret_key, their_public_key):
         computed using their_secret_key and your_public_key.
     """
     p = bytes(32)
-    crypto_key_exchange(p, your_secret_key, their_public_key)
+    crypto_x25519(p, your_secret_key, their_public_key)
     return p
 
 
@@ -472,20 +324,13 @@ def compute_signing_public_key(secret_key):
     :param secret_key: The 32-byte secret key.
     :return: The 32-byte public key.
     """
-    public_key = bytes(32)
-    crypto_sign_public_key(public_key, secret_key)
-    return public_key
-
-
-def public_key_compute(secret_key):
-    warnings.warn("deprecated: use compute_signing_public_key", DeprecationWarning)
-    return compute_signing_public_key(secret_key)
+    return secret_key[32:]
 
 
 def signature_sign(secret_key, message):
     """Cryptographically sign a messge.
 
-    :param secret_key: Your 32-byte secret key.
+    :param secret_key: Your 64-byte secret key.
     :param message: The message to sign.
     :return: The 64-byte signature of message.
 
@@ -493,9 +338,7 @@ def signature_sign(secret_key, message):
     https://pynacl.readthedocs.io/en/stable/signing/.
     """
     sig = bytes(64)
-    kp = bytes(64)
-    crypto_sign_public_key(kp, secret_key)
-    crypto_sign(sig, secret_key, kp, message, len(message))
+    crypto_eddsa_sign(sig, secret_key, message, len(message))
     return sig
 
 
@@ -509,55 +352,7 @@ def signature_check(signature, public_key, message):
     :return: True if the message verifies correctly.  False if the message
         fails verification.
     """
-    return 0 == crypto_check(signature, public_key, message, len(message))
-
-
-cdef class SignatureVerify:
-    cdef crypto_sign_ctx_abstract _ctx
-
-    """Incrementally verify a message.
-
-    :param signature: The 64-byte signature.
-    :param public_key: The 32-byte public key.
-    """
-    def __cinit__(self, signature, public_key):
-        crypto_check_init(&self._ctx, signature, public_key)
-
-    def update(self, message):
-        """Add new data to the payload.
-
-        :param message: Additional data.
-        """
-        crypto_check_update(&self._ctx, message, len(message))
-
-    def finalize(self):
-        """Finalize and return the result.
-
-        :return: True on success or False on failure
-        """
-        return 0 == crypto_check_final(&self._ctx)
-
-# def entropy(message):
-#     """Compute the normalized entropy of a message.
-#
-#     :param message: The bytes object containing the data.
-#     :return: The normalized entropy from 0.0 (constant value) to
-#         1.0 (statistically random).
-#     """
-#     # https://en.wikipedia.org/wiki/Entropy_(information_theory)
-#     # could have used scipy.stats.entropy, but don't want the dependency
-#     msg = np.frombuffer(message, dtype=np.uint8)
-#     data = np.bincount(msg, minlength=256)
-#     k = data.astype(np.float) / float(len(message))
-#     nonzero_k = k[data > 0]
-#     e = -np.sum(nonzero_k * np.log2(nonzero_k))
-#     e_norm = e / 8.0
-#     return e_norm
-#
-#   def test_entropy(self):
-#       msg = b'\x1f\x959c\x91\xfd\xe8\xdd|\xd6\x07\xa5H\x03f\xe7\xe9\xb7' + \
-#             b'\xf8\x80V\xc4\x06k\xda\x81\x1eg\xd9\xab\x02\xfe'
-#       self.assertEqual(0.625, monocypher.entropy(msg))
+    return 0 == crypto_eddsa_check(signature, public_key, message, len(message))
 
 
 def generate_key(length=None, method=None):
@@ -597,14 +392,10 @@ def generate_signing_key_pair():
         import binascii
         print(binascii.hexlify(key))
     """
-    secret = generate_key()
-    public = compute_signing_public_key(secret)
+    secret = bytes(64)
+    public = bytes(32)
+    crypto_eddsa_key_pair(secret, public, generate_key())
     return secret, public
-
-
-def generate_key_pair():
-    warnings.warn("deprecated: use generate_signing_key_pair", DeprecationWarning)
-    return generate_signing_key_pair()
 
 
 def generate_key_exchange_key_pair():
@@ -631,7 +422,7 @@ def elligator_map(hidden: bytes) -> bytes:
     curve = bytes(32)
     if len(hidden) != 32:
         raise ValueError(f'Invalid hidden length {len(hidden)} != 32')
-    crypto_hidden_to_curve(curve, hidden)
+    crypto_elligator_map(curve, hidden)
     return curve
 
 
@@ -651,7 +442,7 @@ def elligator_rev(curve: bytes, tweak=None) -> bytes:
         raise ValueError(f'Invalid curve length {len(curve)} != 32')
     if tweak is None:
         tweak = secrets.randbits(8)
-    rv = crypto_curve_to_hidden(hidden, curve, tweak)
+    rv = crypto_elligator_rev(hidden, curve, tweak)
     if rv:
         raise ValueError('curve point is unsuitable for hiding')
     return hidden
@@ -673,5 +464,5 @@ def elligator_key_pair(seed: bytes = None) -> tuple[bytes, bytes]:
         seed = secrets.token_bytes(32)
     elif len(seed) != 32:
         raise ValueError(f'Invalid seed length {len(seed)} != 32')
-    crypto_hidden_key_pair(hidden, secret_key, seed)
+    crypto_elligator_key_pair(hidden, secret_key, seed)
     return hidden, secret_key

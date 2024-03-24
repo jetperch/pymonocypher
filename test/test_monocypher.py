@@ -79,9 +79,10 @@ class TestMonocypher(unittest.TestCase):
         random = np.random.RandomState(seed=1)
         for i in range(10):
             length = random.randint(1, 4096)
-            secret_key = bytes(random.randint(0, 256, 32, dtype=np.uint8))
+            secret_key, expected_public_key = monocypher.generate_signing_key_pair()
             msg = bytes(random.randint(0, 256, length, dtype=np.uint8))
             public_key = monocypher.compute_signing_public_key(secret_key)
+            self.assertEqual(expected_public_key, public_key)
             sig = monocypher.signature_sign(secret_key, msg)
             self.assertTrue(monocypher.signature_check(sig, public_key, msg))
             self.assertFalse(monocypher.signature_check(sig, public_key, msg + b'0'))
@@ -89,7 +90,7 @@ class TestMonocypher(unittest.TestCase):
             self.assertFalse(monocypher.signature_check(sig2, public_key, msg))
 
     def test_key_exchange_static(self):
-        expect = b'\xd0\x0f\x80\x8b\xf5\xcc\x0f\x85w\xa2\xdad\x88\xa3l\xf1\xf3(p\xd1MMo\xe95\x01\r\x983b\xae\xb7'
+        expect = b'l#\x84\xf2\xc0\xf1:\x8f\xf3\xce\xeeU\x07U@w\x8c\xd9\xf9C\x83\x17\x887\xae$\xf9\xf4\x19\xc1-{'
         your_secret_key = bytes(range(32))
         their_public_key = bytes(range(32, 64))
         shared_key = monocypher.key_exchange(your_secret_key, their_public_key)
@@ -104,18 +105,6 @@ class TestMonocypher(unittest.TestCase):
 
     def test_generate_key(self):
         self.assertEqual(32, len(monocypher.generate_key()))
-
-    def test_deprecation_public_key_compute(self):
-        with warnings.catch_warnings(record=True) as w:
-            monocypher.public_key_compute(bytes(range(32)))
-        self.assertEqual(1, len(w))
-        self.assertIn('deprecated', str(w[0].message))
-
-    def test_deprecation_generate_key_pair(self):
-        with warnings.catch_warnings(record=True) as w:
-            monocypher.generate_key_pair()
-        self.assertEqual(1, len(w))
-        self.assertIn('deprecated', str(w[0].message))
 
     def test_elligator(self):
         hidden1, secret = monocypher.elligator_key_pair()
