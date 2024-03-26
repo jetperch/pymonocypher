@@ -75,6 +75,31 @@ class TestMonocypher(unittest.TestCase):
             msg2 = monocypher.unlock(key, nonce, mac, c, associated_data=aead)
             self.assertEqual(msg, msg2)
 
+    def test_IncrementalAuthenticatedEncryption(self):
+        random = np.random.RandomState(seed=1)
+        for i in range(10):
+            message_length = random.randint(1, 4096)
+            aead_length = random.randint(1, 128)
+            key = bytes(random.randint(0, 256, 32, dtype=np.uint8))
+            nonce = bytes(random.randint(0, 256, 24, dtype=np.uint8))
+            aead = bytes(random.randint(0, 256, aead_length, dtype=np.uint8))
+            msg = bytes(random.randint(0, 256, message_length, dtype=np.uint8))
+
+            sender = monocypher.IncrementalAuthenticatedEncryption(key, nonce)
+            receiver = monocypher.IncrementalAuthenticatedEncryption(key, nonce)
+
+            mac, c = sender.lock(msg, associated_data=aead)
+            msg2 = receiver.unlock(mac, c, associated_data=aead)
+            self.assertEqual(msg, msg2)
+
+            # A second encryption works, but creates a different cipher text
+            mac2, c2 = sender.lock(msg, associated_data=aead)
+            self.assertNotEqual(c, c2)
+            self.assertNotEqual(mac, mac2)
+
+            msg2 = receiver.unlock(mac2, c2, associated_data=aead)
+            self.assertEqual(msg, msg2)
+
     def test_sign(self):
         random = np.random.RandomState(seed=1)
         for i in range(10):

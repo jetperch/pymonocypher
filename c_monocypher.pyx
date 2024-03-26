@@ -203,6 +203,58 @@ def unlock(key, nonce, mac, message, associated_data=None):
     return plain_text
 
 
+cdef class IncrementalAuthenticatedEncryption:
+    cdef crypto_aead_ctx _ctx
+
+    """Instantiate the incremental authenticated encryption handler.
+
+    :param key: The 32-byte shared session key.
+    :param nonce: The 24-byte number, used only once with any given session key.
+    """
+    def __init__(self, key, nonce):
+        if len(key) != 32:
+            raise ValueError(f'Invalid key length {len(key)} != 32')
+
+        if len(nonce) != 24:
+            raise ValueError(f'Invalid nonce length {len(key)} != 24')
+
+        crypto_aead_init_x(&self._ctx, key, nonce)
+
+    def lock(self, message, associated_data=None):
+        """Perform authenticated encryption.
+
+        :param message: The secret message to encrypt.
+        :param associated_data: The additional data to authenticate which
+            is NOT encrypted.
+        :return: the tuple of (MAC, ciphertext).  MAC is the 16-byte message
+            authentication code.  ciphertext is the encrypted message.
+        """
+        mac = bytes(16)
+        crypto_text = bytes(len(message))
+        associated_data = b'' if associated_data is None else associated_data
+        crypto_aead_write(&self._ctx, crypto_text, mac, associated_data, len(associated_data), message, len(message))
+        return mac, crypto_text
+
+    def unlock(self, mac, message, associated_data=None):
+        """Perform authenticated decryption.
+
+        :param mac: The 16-byte message authentication code produced by :func:`lock`.
+        :param message: The ciphertext encrypted message to decrypt produced by :func:`lock`.
+        :param associated_data: The additional data to authenticate which
+            is NOT encrypted.
+        :return: The secret message or None on authentication failure.
+        """
+        if len(mac) != 16:
+            raise ValueError(f'Invalid mac length {len(mac)} != 16')
+
+        plain_text = bytearray(len(message))
+        associated_data = b'' if associated_data is None else associated_data
+        rv = crypto_aead_read(&self._ctx, plain_text, mac, associated_data, len(associated_data), message, len(message))
+        if 0 != rv:
+            return None
+        return plain_text
+
+
 def chacha20(key, nonce, message):
     """Encrypt/Decrypt a message with ChaCha20.
 
