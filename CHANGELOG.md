@@ -4,6 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 4.0.2.1
+
+2024 May 8
+
+* Upgraded Monocypher from 3.1.3 to 4.0.2.
+* Removed incremental SignatureVerify, which was removed from Monocypher.
+
+
 ## 3.1.3.2
 
 2023 Jun 7
