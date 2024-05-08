@@ -102,7 +102,7 @@ class TestMonocypher(unittest.TestCase):
 
     def test_sign(self):
         random = np.random.RandomState(seed=1)
-        for i in range(10):
+        for i in range(100):
             length = random.randint(1, 4096)
             secret_key, expected_public_key = monocypher.generate_signing_key_pair()
             msg = bytes(random.randint(0, 256, length, dtype=np.uint8))
@@ -111,7 +111,7 @@ class TestMonocypher(unittest.TestCase):
             sig = monocypher.signature_sign(secret_key, msg)
             self.assertTrue(monocypher.signature_check(sig, public_key, msg))
             self.assertFalse(monocypher.signature_check(sig, public_key, msg + b'0'))
-            sig2 = sig[:10] + bytes([sig[10] + 1]) + sig[11:]
+            sig2 = sig[:10] + bytes([(sig[10] + 1) & 0xff]) + sig[11:]
             self.assertFalse(monocypher.signature_check(sig2, public_key, msg))
 
     def test_key_exchange_static(self):
