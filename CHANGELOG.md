@@ -4,6 +4,15 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 4.0.2.2
+
+2024 May 10
+
+* Added compute_signing_public_key parameter check.
+* Added argon2i_32 parameter checks.
+* Added typing hints.
+
+
 ## 4.0.2.1
 
 2024 May 8

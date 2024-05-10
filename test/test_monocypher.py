@@ -131,6 +131,10 @@ class TestMonocypher(unittest.TestCase):
     def test_generate_key(self):
         self.assertEqual(32, len(monocypher.generate_key()))
 
+    def test_compute_signing_public_key(self):
+        with self.assertRaises(ValueError):
+            monocypher.compute_signing_public_key(monocypher.generate_key())
+
     def test_elligator(self):
         hidden1, secret = monocypher.elligator_key_pair()
         curve1 = monocypher.elligator_map(hidden1)
