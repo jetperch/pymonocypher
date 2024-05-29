@@ -394,7 +394,7 @@ def compute_signing_public_key(secret_key: bytes) -> bytes:
 
 
 def signature_sign(secret_key: bytes, message: bytes) -> bytes:
-    """Cryptographically sign a messge.
+    """Cryptographically sign a message.
 
     :param secret_key: Your 64-byte secret key.
     :param message: The message to sign.
