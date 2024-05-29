@@ -116,6 +116,18 @@ class TestMonocypher(unittest.TestCase):
             sig2 = sig[:10] + bytes([(sig[10] + 1) & 0xff]) + sig[11:]
             self.assertFalse(monocypher.signature_check(sig2, public_key, msg))
 
+    def test_sign_secret32_deprecated(self):
+        random = np.random.RandomState(seed=1)
+        for i in range(100):
+            length = random.randint(1, 4096)
+            secret_key, public_key = monocypher.generate_signing_key_pair()
+            msg = bytes(random.randint(0, 256, length, dtype=np.uint8))
+            sig = monocypher.signature_sign(secret_key[:32], msg)
+            self.assertTrue(monocypher.signature_check(sig, public_key, msg))
+            self.assertFalse(monocypher.signature_check(sig, public_key, msg + b'0'))
+            sig2 = sig[:10] + bytes([(sig[10] + 1) & 0xff]) + sig[11:]
+            self.assertFalse(monocypher.signature_check(sig2, public_key, msg))
+
     def test_key_exchange_static(self):
         expect = b'l#\x84\xf2\xc0\xf1:\x8f\xf3\xce\xeeU\x07U@w\x8c\xd9\xf9C\x83\x17\x887\xae$\xf9\xf4\x19\xc1-{'
         your_secret_key = bytes(range(32))

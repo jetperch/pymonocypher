@@ -9,6 +9,7 @@ This file contains the list of changes made to pymonocypher.
 2024 May 29
 
 * Restore compute_signing_public_key 32-byte variant with a deprecation warning.
+* Modified signature_sign to still accept 32-byte private key.
 
 
 ## 4.0.2.2

@@ -387,8 +387,8 @@ def compute_signing_public_key(secret_key: bytes) -> bytes:
         secret = bytes(64)
         public = bytes(32)
         crypto_eddsa_key_pair(secret, public, bytes(secret_key))
-        return public
-    elif len(secret_key) != 64:
+        secret_key = secret
+    if len(secret_key) != 64:
         raise ValueError('secret key length invalid')
     return secret_key[32:]
 
@@ -403,6 +403,13 @@ def signature_sign(secret_key: bytes, message: bytes) -> bytes:
     For a quick description of the signing process, see the bottom of
     https://pynacl.readthedocs.io/en/stable/signing/.
     """
+    if len(secret_key) == 32:
+        secret = bytes(64)
+        public = bytes(32)
+        crypto_eddsa_key_pair(secret, public, bytes(secret_key))
+        secret_key = secret
+    elif len(secret_key) != 64:
+        raise ValueError('invalid secret key length')
     sig = bytes(64)
     crypto_eddsa_sign(sig, secret_key, message, len(message))
     return sig
