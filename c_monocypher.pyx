@@ -7,13 +7,12 @@ written in portable C.
 
 from libc.stdint cimport uint8_t, uint32_t, uint64_t
 from libc.stdlib cimport malloc, free
-import binascii
 import secrets
 import warnings
 
 
 # also edit setup.py
-__version__ = '4.0.2.2'   # also change setup.py
+__version__ = '4.0.2.3'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
@@ -382,7 +381,14 @@ def compute_signing_public_key(secret_key: bytes) -> bytes:
     :param secret_key: The 64-byte secret key from generate_signing_key_pair.
     :return: The 32-byte public key.
     """
-    if len(secret_key) != 64:
+    if len(secret_key) == 32:
+        warnings.warn('Provide the full 64-byte key from generate_signing_key_pair()',
+                      DeprecationWarning, stacklevel=2)
+        secret = bytes(64)
+        public = bytes(32)
+        crypto_eddsa_key_pair(secret, public, bytes(secret_key))
+        return public
+    elif len(secret_key) != 64:
         raise ValueError('secret key length invalid')
     return secret_key[32:]
 

@@ -108,6 +108,8 @@ class TestMonocypher(unittest.TestCase):
             msg = bytes(random.randint(0, 256, length, dtype=np.uint8))
             public_key = monocypher.compute_signing_public_key(secret_key)
             self.assertEqual(expected_public_key, public_key)
+            public_key = monocypher.compute_signing_public_key(secret_key[:32])
+            self.assertEqual(expected_public_key, public_key)
             sig = monocypher.signature_sign(secret_key, msg)
             self.assertTrue(monocypher.signature_check(sig, public_key, msg))
             self.assertFalse(monocypher.signature_check(sig, public_key, msg + b'0'))
@@ -132,8 +134,11 @@ class TestMonocypher(unittest.TestCase):
         self.assertEqual(32, len(monocypher.generate_key()))
 
     def test_compute_signing_public_key(self):
-        with self.assertRaises(ValueError):
-            monocypher.compute_signing_public_key(monocypher.generate_key())
+        secret, public = monocypher.generate_signing_key_pair()
+        p1 = monocypher.compute_signing_public_key(bytes(secret))
+        self.assertEqual(public, p1)
+        p2 = monocypher.compute_signing_public_key(bytes(secret[:32]))
+        self.assertEqual(public, p2)
 
     def test_elligator(self):
         hidden1, secret = monocypher.elligator_key_pair()

@@ -4,6 +4,13 @@
 This file contains the list of changes made to pymonocypher.
 
 
+## 4.0.2.3
+
+2024 May 29
+
+* Restore compute_signing_public_key 32-byte variant with a deprecation warning.
+
+
 ## 4.0.2.2
 
 2024 May 10
