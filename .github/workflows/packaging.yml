@@ -125,8 +125,7 @@ jobs:
           CIBW_BUILD: '${{ matrix.python_version }}-*'
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest {package}/test
-        with:
-          package-dir: ${{ steps.find_sdist_filename.outputs.filename }}
+        run: python -m cibuildwheel ${{ steps.find_sdist_filename.outputs.filename }}
 
       - name: Upload python wheels
         uses: actions/upload-artifact@v4
