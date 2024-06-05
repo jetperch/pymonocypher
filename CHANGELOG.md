@@ -6,6 +6,20 @@ This file contains the list of changes made to pymonocypher.
 
 ## 4.0.2.3
 
+2024 June 5 [in progress]
+
+* Patched GitHub action based upon 3.1.3.3 release.
+
+
+## 3.1.3.3
+
+2024 June 5
+
+* Rebuild for Python 3.12
+
+
+## 4.0.2.3
+
 2024 May 29
 
 * Restore compute_signing_public_key 32-byte variant with a deprecation warning.
