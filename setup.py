@@ -69,13 +69,12 @@ setuptools.setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
         'Programming Language :: C',
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
-    install_requires=[
-        'numpy>=1.23',
-    ],
+    install_requires=[],
     ext_modules=extensions,
     python_requires='~=3.9',
 

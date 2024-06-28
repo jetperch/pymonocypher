@@ -9,6 +9,7 @@ This file contains the list of changes made to pymonocypher.
 2024 June 5 [in progress]
 
 * Patched GitHub action based upon 3.1.3.3 release.
+* Removed unnecessary numpy dependency.
 
 
 ## 3.1.3.3
