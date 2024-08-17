@@ -325,7 +325,7 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None) -> b
 
     cdef crypto_argon2_config config;
     config.algorithm = 1
-    config.nb_block = nb_blocks
+    config.nb_blocks = nb_blocks
     config.nb_passes = nb_iterations
     config.nb_lanes = 1
 
