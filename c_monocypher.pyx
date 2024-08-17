@@ -319,7 +319,7 @@ cdef uint32_t _validate_u32(variable_name, value):
     return <uint32_t> value
 
 
-def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None) -> bytes:
+def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wipe=True) -> bytes:
     key = b'' if key is None else key
     ad = b'' if ad is None else ad
 
@@ -347,7 +347,8 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None) -> b
         crypto_argon2(hash, <uint32_t> len(hash), work_area, config, inputs, extras)
     finally:
         free(work_area)
-    crypto_wipe(password, len(password))
+    if _wipe:
+        crypto_wipe(password, len(password))
     return hash
 
 
