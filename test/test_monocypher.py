@@ -176,3 +176,9 @@ class TestMonocypher(unittest.TestCase):
                 pass
         curve2 = monocypher.elligator_map(hidden2)
         self.assertEqual(curve1, curve2)
+
+    def test_argon2i_32(self):
+        expect = b'm\xf3pIA\xe4#\x92\x89h\x9cI\x9c\x08\xbe\xc4v\xb2\xc5\x8c\xa4\x1cV\x9a\xd2b\x0e\x96oer\x02'
+        # use fast nb_blocks and nb_passes values for unit test, do not use these in production
+        hash = monocypher.argon2i_32(8, 3, b'12345', b'salt')
+        self.assertEqual(expect, hash)

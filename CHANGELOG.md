@@ -4,12 +4,16 @@
 This file contains the list of changes made to pymonocypher.
 
 
-## 4.0.2.3
+## 4.0.2.4
 
-2024 June 5 [in progress]
+2024 Aug 17
 
 * Patched GitHub action based upon 3.1.3.3 release.
 * Removed unnecessary numpy dependency.
+* Fixed argon2i_32
+  * Changed incorrect nb_block to nb_blocks
+  * Added "_wipe" argument to optionally skip wipe operation.
+  * Added unit test
 
 
 ## 3.1.3.3
