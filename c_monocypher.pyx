@@ -12,7 +12,7 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '4.0.2.3'   # also change setup.py
+__version__ = '4.0.2.4'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
