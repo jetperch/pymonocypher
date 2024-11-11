@@ -74,9 +74,6 @@ setuptools.setup(
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
-    install_requires=[
-        'numpy>=2.1.0,<3',
-    ],
     ext_modules=extensions,
     python_requires='~=3.10',
 
