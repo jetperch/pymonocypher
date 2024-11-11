@@ -4,6 +4,20 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.2.5
+
+2024 Nov 11
+
+* Rebuild for Python 3.13
+
+
+## 3.1.3.4
+
+2024 Nov 11
+
+* Rebuild for Python 3.13
+
+
 ## 4.0.2.4
 
 2024 Aug 17
