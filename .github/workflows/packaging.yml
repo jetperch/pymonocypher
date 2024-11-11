@@ -1,4 +1,4 @@
-# Copyright 2021-2023 Jetperch LLC
+# Copyright 2021-2024 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ on: ['push', 'pull_request']
 
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.13'
 
 
 jobs:
@@ -89,10 +89,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest", "windows-latest", "macos-latest"]
-        python_version: ["cp39", "cp310", "cp311", "cp312"]
-        exclude:
-          - os: "macos-latest"
-            python_version: "cp39"
+        python_version: ["cp310", "cp311", "cp312", "cp13"]
 
     steps:
       - name: Download sdist
@@ -112,7 +109,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.17.0
+        run: python -m pip install cibuildwheel==2.21.3
 
       - name: Build wheels
         env:
