@@ -30,3 +30,9 @@ You can then use pymonocypher:
     >>> import monocypher
     >>> monocypher.blake2b(b'hello world')
 
+###
+
+You may also build a standalone, reproducible Debian package:
+```
+make deb
+```
