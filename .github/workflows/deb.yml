@@ -5,11 +5,14 @@ on: ['push', 'pull_request']
 jobs:
   deb:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        CC: ["clang", "gcc"]
     steps:
     - uses: actions/checkout@v4
     - name: Install build dependencies
       run: |
         sudo apt update;
-        sudo DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends cython3 build-essential python3 python3-venv python3-build debhelper-compat pybuild-plugin-pyproject python3-all-dev python3-numpy;
+        sudo DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends clang gcc cython3 build-essential python3 python3-venv python3-build debhelper-compat pybuild-plugin-pyproject python3-all-dev python3-numpy;
     - name: Build package
-      run: make deb
+      run: CC=${{ matrix.CC }} make deb

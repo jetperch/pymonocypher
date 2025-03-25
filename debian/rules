@@ -3,3 +3,5 @@
 export PYBUILD_NAME=pymonocypher
 %:
 	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_dwz:
