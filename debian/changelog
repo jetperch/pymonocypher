@@ -1,5 +1,5 @@
-pymonocypher (4.0.2.5-0) unstable; urgency=low
+pymonocypher (4.0.2.6-0) unstable; urgency=low
 
-  * Initial release
+  * Updated build: Added Python 3.14, removed Python 3.10, add arm64
 
- --  Jetperch LLC <joulescope-dev@jetperch.com>  Fri, 14 Mar 2025 16:19:25 +0000
+ --  Jetperch LLC <joulescope-dev@jetperch.com>  Tue, 2 Dec 2025 3:50:00 +0000
