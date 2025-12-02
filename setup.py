@@ -52,7 +52,7 @@ setuptools.setup(
     url='https://github.com/jetperch/pymonocypher',
     author='Jetperch LLC',
     author_email='joulescope-dev@jetperch.com',
-    license='BSD 2-clause',
+    license='BSD-2-clause',
 
     # Classifiers help users find your project by categorizing it.
     #
