@@ -4,6 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.2.6
+
+2025 Dec 2
+
+* Rebuild for Python 3.14, drop 3.10 support.
+* Added linux arm64 wheel.
+
+
 # 4.0.2.5
 
 2024 Nov 11
