@@ -4,6 +4,19 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.2.7
+
+2026 Feb 12
+
+* Addressed [Issue #18](https://github.com/jetperch/pymonocypher/issues/18)
+  * Added `x25519()` function exposing the raw X25519 shared secret primitive.
+  * Added `x25519_public_key()` function to compute X25519 public keys.
+  * Added `chacha20_h()` function exposing HChacha20 for key derivation.
+  * Deprecated `key_exchange()` — use `x25519()` with a KDF instead.
+  * Deprecated `compute_key_exchange_public_key()` — use `x25519_public_key()` instead.
+  * Deprecated `generate_key_exchange_key_pair()` — use `generate_key()` and `x25519_public_key()` instead.
+
+
 # 4.0.2.6
 
 2025 Dec 2

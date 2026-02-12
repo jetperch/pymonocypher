@@ -132,14 +132,18 @@ class TestMonocypher(unittest.TestCase):
         expect = b'l#\x84\xf2\xc0\xf1:\x8f\xf3\xce\xeeU\x07U@w\x8c\xd9\xf9C\x83\x17\x887\xae$\xf9\xf4\x19\xc1-{'
         your_secret_key = bytes(range(32))
         their_public_key = bytes(range(32, 64))
-        shared_key = monocypher.key_exchange(your_secret_key, their_public_key)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            shared_key = monocypher.key_exchange(your_secret_key, their_public_key)
         self.assertEqual(expect, shared_key)
 
     def test_key_exchange_random(self):
-        a_private_secret, a_public_secret = monocypher.generate_key_exchange_key_pair()
-        b_private_secret, b_public_secret = monocypher.generate_key_exchange_key_pair()
-        b_shared_secret = monocypher.key_exchange(b_private_secret, a_public_secret)
-        a_shared_secret = monocypher.key_exchange(a_private_secret, b_public_secret)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            a_private_secret, a_public_secret = monocypher.generate_key_exchange_key_pair()
+            b_private_secret, b_public_secret = monocypher.generate_key_exchange_key_pair()
+            b_shared_secret = monocypher.key_exchange(b_private_secret, a_public_secret)
+            a_shared_secret = monocypher.key_exchange(a_private_secret, b_public_secret)
         self.assertEqual(a_shared_secret, b_shared_secret)
 
     def test_generate_key(self):
@@ -176,6 +180,110 @@ class TestMonocypher(unittest.TestCase):
                 pass
         curve2 = monocypher.elligator_map(hidden2)
         self.assertEqual(curve1, curve2)
+
+    def test_x25519_public_key(self):
+        secret_key = bytes(range(32))
+        public_key = monocypher.x25519_public_key(secret_key)
+        self.assertEqual(32, len(public_key))
+        # Same underlying call as compute_key_exchange_public_key
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            expected = monocypher.compute_key_exchange_public_key(secret_key)
+        self.assertEqual(expected, public_key)
+
+    def test_x25519_public_key_invalid_length(self):
+        with self.assertRaises(ValueError):
+            monocypher.x25519_public_key(b'\x00' * 16)
+
+    def test_x25519_static(self):
+        """x25519() should produce the same output as the current key_exchange()."""
+        your_secret_key = bytes(range(32))
+        their_public_key = bytes(range(32, 64))
+        shared = monocypher.x25519(your_secret_key, their_public_key)
+        self.assertEqual(32, len(shared))
+        # Must match current key_exchange output (same underlying crypto_x25519 call)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            expected = monocypher.key_exchange(your_secret_key, their_public_key)
+        self.assertEqual(expected, shared)
+
+    def test_x25519_roundtrip(self):
+        secret_a = monocypher.generate_key()
+        secret_b = monocypher.generate_key()
+        public_a = monocypher.x25519_public_key(secret_a)
+        public_b = monocypher.x25519_public_key(secret_b)
+        shared_ab = monocypher.x25519(secret_a, public_b)
+        shared_ba = monocypher.x25519(secret_b, public_a)
+        self.assertEqual(shared_ab, shared_ba)
+
+    def test_x25519_invalid_length(self):
+        with self.assertRaises(ValueError):
+            monocypher.x25519(b'\x00' * 16, b'\x00' * 32)
+        with self.assertRaises(ValueError):
+            monocypher.x25519(b'\x00' * 32, b'\x00' * 16)
+
+    def test_chacha20_h(self):
+        key = bytes(range(32))
+        input_bytes = bytes(16)
+        result = monocypher.chacha20_h(key, input_bytes)
+        self.assertEqual(32, len(result))
+        # Deterministic: same inputs produce same output
+        self.assertEqual(result, monocypher.chacha20_h(key, input_bytes))
+        # Different inputs produce different output
+        different_input = bytes(range(16))
+        self.assertNotEqual(result, monocypher.chacha20_h(key, different_input))
+
+    def test_chacha20_h_invalid_length(self):
+        with self.assertRaises(ValueError):
+            monocypher.chacha20_h(b'\x00' * 16, b'\x00' * 16)
+        with self.assertRaises(ValueError):
+            monocypher.chacha20_h(b'\x00' * 32, b'\x00' * 8)
+
+    def test_chacha20_h_as_kdf(self):
+        """Demonstrate using chacha20_h as a KDF after x25519, replicating v3 key_exchange behavior."""
+        secret_a = monocypher.generate_key()
+        secret_b = monocypher.generate_key()
+        public_a = monocypher.x25519_public_key(secret_a)
+        public_b = monocypher.x25519_public_key(secret_b)
+        raw_ab = monocypher.x25519(secret_a, public_b)
+        raw_ba = monocypher.x25519(secret_b, public_a)
+        # Derive session keys using HChacha20
+        derived_ab = monocypher.chacha20_h(raw_ab, bytes(16))
+        derived_ba = monocypher.chacha20_h(raw_ba, bytes(16))
+        self.assertEqual(derived_ab, derived_ba)
+        # Derived key differs from raw shared secret
+        self.assertNotEqual(raw_ab, derived_ab)
+
+    def test_key_exchange_deprecation_warning(self):
+        your_secret_key = bytes(range(32))
+        their_public_key = bytes(range(32, 64))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            monocypher.key_exchange(your_secret_key, their_public_key)
+            self.assertEqual(1, len(w))
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn('x25519()', str(w[0].message))
+
+    def test_compute_key_exchange_public_key_deprecation_warning(self):
+        secret_key = bytes(range(32))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            monocypher.compute_key_exchange_public_key(secret_key)
+            self.assertEqual(1, len(w))
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn('x25519_public_key()', str(w[0].message))
+
+    def test_generate_key_exchange_key_pair_deprecation_warning(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            secret, public = monocypher.generate_key_exchange_key_pair()
+            self.assertEqual(1, len(w))
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn('generate_key()', str(w[0].message))
+        # Still produces valid keys
+        self.assertEqual(32, len(secret))
+        self.assertEqual(32, len(public))
+        self.assertEqual(monocypher.x25519_public_key(secret), public)
 
     def test_argon2i_32(self):
         expect = b'm\xf3pIA\xe4#\x92\x89h\x9cI\x9c\x08\xbe\xc4v\xb2\xc5\x8c\xa4\x1cV\x9a\xd2b\x0e\x96oer\x02'
