@@ -3,6 +3,13 @@
 
 This file contains the list of changes made to pymonocypher.
 
+## 3.1.3.6
+
+2026 Apr 28
+
+* Added Windows 11 arm support.
+
+
 ## 3.1.3.5
 
 2025 Dec 2
