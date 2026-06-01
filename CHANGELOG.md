@@ -4,7 +4,7 @@
 This file contains the list of changes made to pymonocypher.
 
 
-# 4.0.2.7
+# 4.0.2.8
 
 2026 Jun 1
 
