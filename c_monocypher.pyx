@@ -329,6 +329,9 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wip
     config.nb_passes = nb_iterations
     config.nb_lanes = 1
 
+    if config.nb_blocks < (config.nb_lanes * 8):
+       raise ValueError(f'nb_blocks must be >= {config.nb_lanes * 8}, got {config.nb_blocks}')
+
     cdef crypto_argon2_inputs inputs;
     inputs.pass_ = password
     inputs.pass_size = _validate_u32('password', len(password))
