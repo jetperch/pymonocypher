@@ -355,25 +355,93 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wip
     return hash
 
 
+def x25519_public_key(secret_key: bytes) -> bytes:
+    """Compute the X25519 public key from a secret key.
+
+    :param secret_key: The 32-byte secret key.
+    :return: The 32-byte public key.
+    """
+    if len(secret_key) != 32:
+        raise ValueError(f'Invalid secret_key length {len(secret_key)} != 32')
+    public_key = bytes(32)
+    crypto_x25519_public_key(public_key, secret_key)
+    return public_key
+
+
+def x25519(your_secret_key: bytes, their_public_key: bytes) -> bytes:
+    """Compute the raw X25519 shared secret.
+
+    WARNING: The raw shared secret is not uniformly random.
+    Do not use it directly as a session key.
+    You MUST apply a key derivation function (KDF) such as
+    crypto_chacha20_h (HChacha20) or BLAKE2b before use.
+
+    :param your_secret_key: Your private, secret 32-byte key.
+    :param their_public_key: Their public 32-byte key.
+    :return: The 32-byte raw shared secret.
+    """
+    if len(your_secret_key) != 32:
+        raise ValueError(f'Invalid your_secret_key length {len(your_secret_key)} != 32')
+    if len(their_public_key) != 32:
+        raise ValueError(f'Invalid their_public_key length {len(their_public_key)} != 32')
+    shared_secret = bytes(32)
+    crypto_x25519(shared_secret, your_secret_key, their_public_key)
+    return shared_secret
+
+
+def chacha20_h(key: bytes, input: bytes) -> bytes:
+    """Compute HChacha20 (the hash variant of ChaCha20).
+
+    This is useful as a key derivation function (KDF) to derive
+    a uniformly random session key from a raw X25519 shared secret.
+
+    :param key: The 32-byte key (e.g., raw X25519 shared secret).
+    :param input: The 16-byte input (typically all zeros for KDF usage).
+    :return: The 32-byte derived key.
+    """
+    if len(key) != 32:
+        raise ValueError(f'Invalid key length {len(key)} != 32')
+    if len(input) != 16:
+        raise ValueError(f'Invalid input length {len(input)} != 16')
+    out = bytes(32)
+    crypto_chacha20_h(out, key, input)
+    return out
+
+
 def compute_key_exchange_public_key(secret_key: bytes) -> bytes:
     """Generate the public key for key exchange from the secret key.
+
+    .. deprecated:: 4.0.2.7
+        Use :func:`x25519_public_key` instead.
 
     :param secret_key: The 32-byte secret key.
     :return: The 32-byte public key for :func:`key_exchange`.
     """
+    warnings.warn(
+        'compute_key_exchange_public_key() is deprecated, use x25519_public_key() instead',
+        DeprecationWarning, stacklevel=2)
     public_key = bytes(32)
     crypto_x25519_public_key(public_key, secret_key)
     return public_key
 
 
 def key_exchange(your_secret_key: bytes, their_public_key: bytes) -> bytes:
-    """Compute a shared secret based upon public-key crytography.
+    """Compute a shared secret based upon public-key cryptography.
+
+    .. deprecated:: 4.0.2.7
+        Use :func:`x25519` combined with a key derivation function
+        such as :func:`chacha20_h` or :func:`blake2b` instead.
 
     :param your_secret_key: Your private, secret 32-byte key.
     :param their_public_key: Their public 32-byte key.
     :return: A 32-byte shared secret that can will match what is
         computed using their_secret_key and your_public_key.
     """
+    warnings.warn(
+        'key_exchange() is deprecated. Use x25519() combined with a KDF '
+        '(e.g., chacha20_h() or blake2b()) instead. '
+        'The raw X25519 output is not suitable for direct use as a key.',
+        DeprecationWarning, stacklevel=2)
     p = bytes(32)
     crypto_x25519(p, your_secret_key, their_public_key)
     return p
@@ -482,10 +550,17 @@ def generate_signing_key_pair() -> tuple[bytes, bytes]:
 def generate_key_exchange_key_pair() -> tuple[bytes, bytes]:
     """Generate a new keypair for key exchange using default settings.
 
+    .. deprecated:: 4.0.2.7
+        Use :func:`generate_key` and :func:`x25519_public_key` instead.
+
     :return: (secret, public)
     """
+    warnings.warn(
+        'generate_key_exchange_key_pair() is deprecated. '
+        'Use generate_key() and x25519_public_key() instead.',
+        DeprecationWarning, stacklevel=2)
     secret = generate_key()
-    public = compute_key_exchange_public_key(secret)
+    public = x25519_public_key(secret)
     return secret, public
 
 
