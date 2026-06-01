@@ -11,7 +11,7 @@ import setuptools
 import os
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
-VERSION = '4.0.2.6'  # also change c_monocypher.pyx
+VERSION = '4.0.2.7'  # also change c_monocypher.pyx
 
 
 try:
@@ -70,6 +70,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: C',
     ],
 
