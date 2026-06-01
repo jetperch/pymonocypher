@@ -1,4 +1,4 @@
-# Copyright 2021-2024 Jetperch LLC
+# Copyright 2021-2026 Jetperch LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ jobs:
         run: pytest
 
       - name: Upload python source package
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -96,7 +96,7 @@ jobs:
 
     steps:
       - name: Download sdist
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist/
@@ -112,7 +112,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.3
+        run: python -m pip install cibuildwheel==3.4.1
 
       - name: Build wheels
         env:
@@ -128,7 +128,7 @@ jobs:
         run: python -m cibuildwheel ${{ steps.find_sdist_filename.outputs.filename }}
 
       - name: Upload python wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: python_wheel-${{ matrix.os }}-${{ matrix.python_version }}
           path: wheelhouse/*.whl
@@ -147,13 +147,13 @@ jobs:
 
     steps:
       - name: Download python sdist artifact
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: sdist
           path: dist/
 
       - name: Download python wheel artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           pattern: python_wheel-*
           merge-multiple: true
@@ -164,12 +164,30 @@ jobs:
         run: ls dist/*
 
       - name: Publish packages to PyPi
-        uses: pypa/gh-action-pypi-publish@v1.13.0
+        uses: pypa/gh-action-pypi-publish@v1.14.0
         with:
           print-hash: true
 
       - name: Publish Release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*
+
+  deb:
+    name: Build deb package
+    if: github.event_name == 'push' && startswith(github.ref, 'refs/tags/v')
+    needs:
+      - publish_python
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        CC: ["clang", "gcc"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          sudo apt update;
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends clang gcc cython3 build-essential python3 python3-venv python3-build debhelper-compat pybuild-plugin-pyproject python3-all-dev python3-numpy;
+      - name: Build package
+        run: CC=${{ matrix.CC }} make deb

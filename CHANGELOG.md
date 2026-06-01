@@ -4,6 +4,17 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.2.7
+
+2026 Jun 1
+
+* Added parameter validation to prevent possible heap buffer overflow in argon2i_32.
+  * Thank you Haris (hextheshadow) for the vulnerability report & fix.
+* Added Python 3.14 to setup.py
+* Bumped GitHub actions versions.
+* Fixed debian package build to run after python release.
+
+
 # 4.0.2.6
 
 2025 Dec 2
