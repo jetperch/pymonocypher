@@ -66,7 +66,6 @@ setuptools.setup(
         'Topic :: Security :: Cryptography',
 
         # Supported Python versions
-        'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
@@ -77,7 +76,7 @@ setuptools.setup(
     keywords='cryto cryptography monocypher chacha blake2b 25519',
     install_requires=[],
     ext_modules=extensions,
-    python_requires='~=3.10',
+    python_requires='~=3.11',
 
     project_urls={
         'Bug Reports': 'https://github.com/jetperch/pymonocypher/issues',

@@ -20,6 +20,7 @@ This file contains the list of changes made to pymonocypher.
       The caller's object is never modified.  Callers who also want their
       own seed object destroyed can explicitly call `wipe()`.
     * Thank you to @geostergiop who reported this issue.
+* Fixed setup.py to indicate Python 3.10 was dropped.
 
 
 # 4.0.3.0
