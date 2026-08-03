@@ -12,7 +12,7 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '4.0.3.0'   # also change setup.py
+__version__ = '4.0.3.1'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
@@ -452,13 +452,19 @@ def compute_signing_public_key(secret_key: bytes) -> bytes:
 
     :param secret_key: The 64-byte secret key from generate_signing_key_pair.
     :return: The 32-byte public key.
+
+    The provided secret_key object is never modified.  Monocypher wipes the
+    private, internal seed copy.  Callers who also want their own secret_key
+    object destroyed can explicitly call :func:`wipe`.
     """
     if len(secret_key) == 32:
         warnings.warn('Provide the full 64-byte key from generate_signing_key_pair()',
                       DeprecationWarning, stacklevel=2)
         secret = bytes(64)
         public = bytes(32)
-        crypto_eddsa_key_pair(secret, public, bytes(secret_key))
+        # crypto_eddsa_key_pair wipes its seed argument: pass a private copy,
+        # never the caller's immutable bytes storage.
+        crypto_eddsa_key_pair(secret, public, bytes(bytearray(secret_key)))
         secret_key = secret
     if len(secret_key) != 64:
         raise ValueError('secret key length invalid')
@@ -472,13 +478,19 @@ def signature_sign(secret_key: bytes, message: bytes) -> bytes:
     :param message: The message to sign.
     :return: The 64-byte signature of message.
 
+    The provided secret_key object is never modified.  Monocypher wipes the
+    private, internal seed copy.  Callers who also want their own secret_key
+    object destroyed can explicitly call :func:`wipe`.
+
     For a quick description of the signing process, see the bottom of
     https://pynacl.readthedocs.io/en/stable/signing/.
     """
     if len(secret_key) == 32:
         secret = bytes(64)
         public = bytes(32)
-        crypto_eddsa_key_pair(secret, public, bytes(secret_key))
+        # crypto_eddsa_key_pair wipes its seed argument: pass a private copy,
+        # never the caller's immutable bytes storage.
+        crypto_eddsa_key_pair(secret, public, bytes(bytearray(secret_key)))
         secret_key = secret
     elif len(secret_key) != 64:
         raise ValueError('invalid secret key length')
@@ -613,12 +625,20 @@ def elligator_key_pair(seed: bytes = None) -> tuple[bytes, bytes]:
         * hidden: The 32-byte little ending encoding of a point on the curve
           which is effectively indistinguishable from random.
         * secret_key: The generated 32-byte little endian secret key.
+
+    The provided seed object is never modified.  Monocypher wipes the
+    private, internal seed copy.  Callers who also want their own seed
+    object destroyed can explicitly call :func:`wipe`.
     """
     hidden = bytes(32)
     secret_key = bytes(32)
     if seed is None:
         seed = secrets.token_bytes(32)
-    elif len(seed) != 32:
+    elif len(seed) == 32:
+        # crypto_elligator_key_pair wipes its seed argument: pass a private
+        # copy, never the caller's immutable bytes storage.
+        seed = bytes(bytearray(seed))
+    else:
         raise ValueError(f'Invalid seed length {len(seed)} != 32')
     crypto_elligator_key_pair(hidden, secret_key, seed)
     return hidden, secret_key

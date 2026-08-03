@@ -156,6 +156,54 @@ class TestMonocypher(unittest.TestCase):
         p2 = monocypher.compute_signing_public_key(bytes(secret[:32]))
         self.assertEqual(public, p2)
 
+    def test_compute_signing_public_key_secret32_input_not_mutated(self):
+        # Regression: the 32-byte compatibility path passed the caller's
+        # immutable bytes object as Monocypher's seed buffer, which the
+        # backend wipes, zeroing the caller's object and all aliases.
+        secret, public = monocypher.generate_signing_key_pair()
+        seed = secret[:32]
+        original = bytes(bytearray(seed))
+        alias = memoryview(seed)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            p1 = monocypher.compute_signing_public_key(seed)
+            self.assertEqual(original, seed)
+            self.assertEqual(original, alias.tobytes())
+            p2 = monocypher.compute_signing_public_key(seed)
+        self.assertEqual(public, p1)
+        self.assertEqual(p1, p2)
+
+    def test_signature_sign_secret32_input_not_mutated(self):
+        secret, public = monocypher.generate_signing_key_pair()
+        seed = secret[:32]
+        original = bytes(bytearray(seed))
+        msg = b'immutable seed regression'
+        sig1 = monocypher.signature_sign(seed, msg)
+        self.assertEqual(original, seed)
+        sig2 = monocypher.signature_sign(seed, msg)
+        self.assertEqual(sig1, sig2)
+        self.assertTrue(monocypher.signature_check(sig1, public, msg))
+
+    def test_signing_seed_usable_as_dict_key(self):
+        # Mutation after the hash is cached breaks the equality/hash
+        # invariant: an equal fresh copy must still find the entry.
+        secret, public = monocypher.generate_signing_key_pair()
+        seed = secret[:32]
+        registry = {seed: public}
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            monocypher.compute_signing_public_key(seed)
+        self.assertEqual(public, registry[bytes(bytearray(seed))])
+
+    def test_elligator_key_pair_seed_not_mutated(self):
+        seed = secrets.token_bytes(32)
+        original = bytes(bytearray(seed))
+        hidden1, secret1 = monocypher.elligator_key_pair(seed)
+        self.assertEqual(original, seed)
+        hidden2, secret2 = monocypher.elligator_key_pair(seed)
+        self.assertEqual(hidden1, hidden2)
+        self.assertEqual(secret1, secret2)
+
     def test_elligator(self):
         hidden1, secret = monocypher.elligator_key_pair()
         curve1 = monocypher.elligator_map(hidden1)

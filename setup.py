@@ -11,7 +11,7 @@ import setuptools
 import os
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
-VERSION = '4.0.3.0'  # also change c_monocypher.pyx
+VERSION = '4.0.3.1'  # also change c_monocypher.pyx, debian/changelog
 
 
 try:

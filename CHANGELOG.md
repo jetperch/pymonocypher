@@ -4,6 +4,24 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.1
+
+2026 Aug 3
+
+* Fixed security vulnerability: seed buffer aliasing with caller-owned bytes objects.
+    * `compute_signing_public_key()` and `signature_sign()` (32-byte
+      compatibility paths) and `elligator_key_pair()` passed the caller's
+      immutable Python bytes object as Monocypher's mutable seed buffer.
+      Monocypher deliberately wipes that seed, so a successful call zeroed
+      the caller's object and all of its aliases.  Reusing the same object
+      then silently derived keys or signed under the publicly reproducible
+      all-zero seed.
+    * These functions now pass a private seed copy, which Monocypher wipes.
+      The caller's object is never modified.  Callers who also want their
+      own seed object destroyed can explicitly call `wipe()`.
+    * Thank you to @geostergiop who reported this issue.
+
+
 # 4.0.3.0
 
 2026 Jun 21
