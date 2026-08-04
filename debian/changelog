@@ -1,16 +1,7 @@
-pymonocypher (4.0.3.1-0) unstable; urgency=medium
+pymonocypher (4.0.3.2-0) unstable; urgency=medium
 
-* Fixed security vulnerability: seed buffer aliasing with caller-owned bytes objects.
-    * `compute_signing_public_key()` and `signature_sign()` (32-byte
-      compatibility paths) and `elligator_key_pair()` passed the caller's
-      immutable Python bytes object as Monocypher's mutable seed buffer.
-      Monocypher deliberately wipes that seed, so a successful call zeroed
-      the caller's object and all of its aliases.  Reusing the same object
-      then silently derived keys or signed under the publicly reproducible
-      all-zero seed.
-    * These functions now pass a private seed copy, which Monocypher wipes.
-      The caller's object is never modified.  Callers who also want their
-      own seed object destroyed can explicitly call `wipe()`.
-    * Thank you to @geostergiop who reported this issue.
+* Fixed security vulnerability in argon2i_32: potential NULL pointer dereferencing.
+  * Only occurs for nb_blocks intentionally too big to create out of memory malloc.
+  * Thank you to @arpitjain099 who reported this issue.
 
- --  Jetperch LLC <joulescope-dev@jetperch.com>  Mon, 3 Aug 2026 21:00:00 +0000
+ --  Jetperch LLC <joulescope-dev@jetperch.com>  Tue, 4 Aug 2026 16:00:00 +0000

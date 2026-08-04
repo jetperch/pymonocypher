@@ -4,6 +4,15 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.2
+
+2026 Aug 4
+
+* Fixed security vulnerability in argon2i_32: potential NULL pointer dereferencing.
+  * Only occurs for nb_blocks intentionally too big to create out of memory malloc.
+  * Thank you to @arpitjain099 who reported this issue.
+
+
 # 4.0.3.1
 
 2026 Aug 3

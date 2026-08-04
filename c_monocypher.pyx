@@ -12,7 +12,7 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '4.0.3.1'   # also change setup.py
+__version__ = '4.0.3.2'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
@@ -346,6 +346,9 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wip
 
     hash = bytes(32)
     work_area = malloc((<size_t> nb_blocks) * (<size_t> 1024))
+    if work_area == NULL:
+        raise MemoryError('argon2i_32 work_area allocation failed')
+
     try:
         crypto_argon2(hash, <uint32_t> len(hash), work_area, config, inputs, extras)
     finally:
