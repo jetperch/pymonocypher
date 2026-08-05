@@ -1,7 +1,6 @@
-pymonocypher (4.0.3.2-0) unstable; urgency=medium
+pymonocypher (4.0.3.3-0) unstable; urgency=low
 
-* Fixed security vulnerability in argon2i_32: potential NULL pointer dereferencing.
-  * Only occurs for nb_blocks intentionally too big to create out of memory malloc.
-  * Thank you to @arpitjain099 who reported this issue.
+* Added windows-11-arm build support
+* Dropped Python 3.11 support
 
- --  Jetperch LLC <joulescope-dev@jetperch.com>  Tue, 4 Aug 2026 16:00:00 +0000
+ --  Jetperch LLC <joulescope-dev@jetperch.com>  Wed, 5 Aug 2026 14:30:00 +0000

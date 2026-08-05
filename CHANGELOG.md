@@ -4,6 +4,14 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.3
+
+2026 Aug 5
+
+* Added windows-11-arm build support
+* Dropped Python 3.11 support
+
+
 # 4.0.3.2
 
 2026 Aug 4
