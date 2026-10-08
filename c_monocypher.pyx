@@ -12,7 +12,7 @@ import warnings
 
 
 # also edit setup.py
-__version__ = '4.0.3.3'   # also change setup.py
+__version__ = '4.0.3.4'   # also change setup.py
 __title__ = 'pymonocypher'
 __description__ = 'Python ctypes bindings to the Monocypher library'
 __url__ = 'https://github.com/jetperch/pymonocypher'
@@ -24,11 +24,11 @@ __copyright__ = 'Copyright 2018-2026 Jetperch LLC'
 
 cdef extern from "monocypher.h":
 
-    cpdef int crypto_verify16(const uint8_t a[16], const uint8_t b[16])
+    int _crypto_verify16 "crypto_verify16"(const uint8_t a[16], const uint8_t b[16])
 
-    cpdef int crypto_verify32(const uint8_t a[32], const uint8_t b[32])
+    int _crypto_verify32 "crypto_verify32"(const uint8_t a[32], const uint8_t b[32])
 
-    cpdef int crypto_verify64(const uint8_t a[64], const uint8_t b[64])
+    int _crypto_verify64 "crypto_verify64"(const uint8_t a[64], const uint8_t b[64])
 
     void crypto_wipe(uint8_t* secret, size_t size)
 
@@ -152,14 +152,62 @@ cdef extern from "monocypher.h":
     void crypto_elligator_key_pair(uint8_t hidden[32], uint8_t secret_key[32], uint8_t seed[32])
 
 
+# Monocypher reads and writes fixed-size buffers through bare pointers
+# without knowing their actual length.  Validate every fixed-size argument
+# here, before it reaches C, to prevent buffer over-reads and overflows.
+cdef _check_len(name, value, size_t expected):
+    if len(value) != expected:
+        raise ValueError(f'Invalid {name} length {len(value)} != {expected}')
+
+
+cdef _check_blake2b_key(key):
+    if len(key) > 64:
+        raise ValueError(f'Invalid key length {len(key)} > 64')
+
+
+def crypto_verify16(a, b) -> int:
+    """Compare two 16-byte buffers in constant time.
+
+    :return: 0 if equal, -1 otherwise.
+    """
+    _check_len('a', a, 16)
+    _check_len('b', b, 16)
+    return _crypto_verify16(a, b)
+
+
+def crypto_verify32(a, b) -> int:
+    """Compare two 32-byte buffers in constant time.
+
+    :return: 0 if equal, -1 otherwise.
+    """
+    _check_len('a', a, 32)
+    _check_len('b', b, 32)
+    return _crypto_verify32(a, b)
+
+
+def crypto_verify64(a, b) -> int:
+    """Compare two 64-byte buffers in constant time.
+
+    :return: 0 if equal, -1 otherwise.
+    """
+    _check_len('a', a, 64)
+    _check_len('b', b, 64)
+    return _crypto_verify64(a, b)
+
+
 def wipe(data):
     """Wipe a bytes object from memory.
 
-    :param data: The bytes object to clear.
+    :param data: The bytes or bytearray object to clear.
+    :raise ValueError: If data is a single-byte bytes object, which CPython
+        shares as an interpreter-wide singleton.
 
-    WARNING: this violates the Python memory model and may result in corrupted
-    data.  Ensure that the data to wipe is the only active reference!
+    WARNING: wiping a bytes object violates the Python memory model and may
+    result in corrupted data.  Ensure that the data to wipe is the only
+    active reference!  Prefer bytearray for secrets that you intend to wipe.
     """
+    if isinstance(data, bytes) and len(data) == 1:
+        raise ValueError('Cannot wipe single-byte bytes: shared CPython singleton')
     crypto_wipe(data, len(data))
 
 
@@ -175,6 +223,8 @@ def lock(key, nonce, message, associated_data=None):
     :return: the tuple of (MAC, ciphertext).  MAC is the 16-byte message
         authentication code.  ciphertext is the encrypted message.
     """
+    _check_len('key', key, 32)
+    _check_len('nonce', nonce, 24)
     mac = bytes(16)
     crypto_text = bytes(len(message))
     associated_data = b'' if associated_data is None else associated_data
@@ -194,6 +244,9 @@ def unlock(key, nonce, mac, message, associated_data=None):
         is NOT encrypted.
     :return: The secret message or None on authentication failure.
     """
+    _check_len('key', key, 32)
+    _check_len('nonce', nonce, 24)
+    _check_len('mac', mac, 16)
     plain_text = bytearray(len(message))
     associated_data = b'' if associated_data is None else associated_data
     rv = crypto_aead_unlock(plain_text, mac, key, nonce, associated_data, len(associated_data), message, len(message))
@@ -215,7 +268,7 @@ cdef class IncrementalAuthenticatedEncryption:
             raise ValueError(f'Invalid key length {len(key)} != 32')
 
         if len(nonce) != 24:
-            raise ValueError(f'Invalid nonce length {len(key)} != 24')
+            raise ValueError(f'Invalid nonce length {len(nonce)} != 24')
 
         crypto_aead_init_x(&self._ctx, key, nonce)
 
@@ -262,6 +315,7 @@ def chacha20(key, nonce, message):
     :param message: The message to encrypt or decrypt.
     :return: The message XOR'ed with the ChaCha20 stream.
     """
+    _check_len('key', key, 32)
     result = bytes(len(message))
     if 24 == len(nonce):
         crypto_chacha20_x(result, message, len(message), key, nonce, 0)
@@ -274,7 +328,14 @@ def chacha20(key, nonce, message):
 
 
 def blake2b(msg, key=None):
+    """Compute the 64-byte Blake2b hash.
+
+    :param msg: The message to hash.
+    :param key: The optional key, up to 64 bytes.
+    :return: The 64-byte hash.
+    """
     key = b'' if key is None else key
+    _check_blake2b_key(key)
     if isinstance(msg, str):
         msg = msg.encode('utf-8')
     hash = bytes(64)
@@ -285,31 +346,45 @@ def blake2b(msg, key=None):
 cdef class Blake2b:
     cdef crypto_blake2b_ctx _ctx
     cdef int _hash_size
+    cdef bint _finalized
 
     """Incrementally compute the Blake2b hash.
 
-    :param key: The optional 32-byte key.
-    :param hash_size: The resulting hash size.  None (default) is 64.
+    :param key: The optional key, up to 64 bytes.
+    :param hash_size: The resulting hash size from 1 to 64.
+        None (default) is 64.
     """
     def __init__(self, key=None, hash_size=None):
         key = b'' if key is None else key
-        self._hash_size = 64 if hash_size is None else hash_size
+        _check_blake2b_key(key)
+        hash_size = 64 if hash_size is None else hash_size
+        if not 1 <= hash_size <= 64:
+            raise ValueError(f'Invalid hash_size {hash_size}, must be 1 to 64')
+        self._hash_size = hash_size
+        self._finalized = False
         crypto_blake2b_keyed_init(&self._ctx, self._hash_size, key, len(key))
 
     def update(self, message):
         """Add new data to the hash.
 
         :param message: Additional data to hash.
+        :raise RuntimeError: If already finalized.
         """
+        if self._finalized:
+            raise RuntimeError('Blake2b already finalized')
         crypto_blake2b_update(&self._ctx, message, len(message))
 
     def finalize(self):
         """Finalize and return the computed hash.
 
         :return: The hash.
+        :raise RuntimeError: If already finalized.
         """
+        if self._finalized:
+            raise RuntimeError('Blake2b already finalized')
         hash = bytes(self._hash_size)
         crypto_blake2b_final(&self._ctx, hash)
+        self._finalized = True
         return hash
 
 
@@ -320,8 +395,23 @@ cdef uint32_t _validate_u32(variable_name, value):
 
 
 def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wipe=True) -> bytes:
+    """Compute the 32-byte Argon2i password hash.
+
+    :param nb_blocks: The number of 1024-byte memory blocks, at least 8.
+    :param nb_iterations: The number of passes, at least 1.
+    :param password: The password.
+    :param salt: The salt.
+    :param key: The optional secret key.
+    :param ad: The optional additional data.
+    :param _wipe: When True (default), wipe password after hashing.
+        Only bytearray passwords are wiped.  Immutable bytes passwords
+        are never modified since the Python interpreter may share them.
+    :return: The 32-byte hash.
+    """
     key = b'' if key is None else key
     ad = b'' if ad is None else ad
+    if nb_iterations < 1:
+        raise ValueError(f'nb_iterations must be >= 1, got {nb_iterations}')
 
     cdef crypto_argon2_config config;
     config.algorithm = 1
@@ -353,7 +443,7 @@ def argon2i_32(nb_blocks, nb_iterations, password, salt, key=None, ad=None, _wip
         crypto_argon2(hash, <uint32_t> len(hash), work_area, config, inputs, extras)
     finally:
         free(work_area)
-    if _wipe:
+    if _wipe and isinstance(password, bytearray):
         crypto_wipe(password, len(password))
     return hash
 
@@ -423,6 +513,7 @@ def compute_key_exchange_public_key(secret_key: bytes) -> bytes:
     warnings.warn(
         'compute_key_exchange_public_key() is deprecated, use x25519_public_key() instead',
         DeprecationWarning, stacklevel=2)
+    _check_len('secret_key', secret_key, 32)
     public_key = bytes(32)
     crypto_x25519_public_key(public_key, secret_key)
     return public_key
@@ -445,6 +536,8 @@ def key_exchange(your_secret_key: bytes, their_public_key: bytes) -> bytes:
         '(e.g., chacha20_h() or blake2b()) instead. '
         'The raw X25519 output is not suitable for direct use as a key.',
         DeprecationWarning, stacklevel=2)
+    _check_len('your_secret_key', your_secret_key, 32)
+    _check_len('their_public_key', their_public_key, 32)
     p = bytes(32)
     crypto_x25519(p, your_secret_key, their_public_key)
     return p
@@ -511,7 +604,11 @@ def signature_check(signature, public_key, message) -> bool:
     :param message: The message to check.
     :return: True if the message verifies correctly.  False if the message
         fails verification.
+    :raise ValueError: If signature is not 64 bytes or public_key is not
+        32 bytes.
     """
+    _check_len('signature', signature, 64)
+    _check_len('public_key', public_key, 32)
     return 0 == crypto_eddsa_check(signature, public_key, message, len(message))
 
 

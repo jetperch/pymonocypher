@@ -4,6 +4,37 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.4
+
+2026 Oct 8
+
+* Fixed security vulnerability: unchecked buffer sizes passed from Python to C.
+    * Monocypher reads and writes fixed-size buffers through bare pointers
+      and relies on the caller to provide correctly sized arguments.
+      Several bindings did not validate argument lengths, so incorrectly
+      sized arguments caused out-of-bounds memory access.
+    * `blake2b()` and `Blake2b()` keys longer than 128 bytes overflowed a
+      stack buffer and crashed the interpreter.  Keys are now limited to
+      64 bytes, the BLAKE2b maximum.
+    * `signature_check()`, `lock()`, `unlock()`, `chacha20()`,
+      `crypto_verify16()`, `crypto_verify32()`, `crypto_verify64()`,
+      `key_exchange()` and `compute_key_exchange_public_key()` read past
+      the end of undersized key, nonce, mac, signature and public key
+      arguments.  These functions now raise ValueError for invalid lengths.
+    * Thank you to @manus-pi who reported these issues.
+* Fixed security vulnerability: `argon2i_32()` wiped immutable bytes passwords.
+    * The default `_wipe=True` zeroed the caller's bytes object, including
+      interpreter-wide single-byte singletons and code constants.
+    * `argon2i_32()` now only wipes bytearray passwords.
+    * `wipe()` now rejects single-byte bytes objects.
+* Fixed `argon2i_32()` to require nb_iterations >= 1.  Zero iterations
+  produced a hash independent of the password and salt.
+* Fixed `Blake2b()` to require hash_size from 1 to 64.
+* Fixed `Blake2b` to raise RuntimeError on `update()` or `finalize()`
+  after `finalize()`, which previously returned an all-zero hash.
+* Fixed IncrementalAuthenticatedEncryption invalid nonce length message.
+
+
 # 4.0.3.3
 
 2026 Aug 5

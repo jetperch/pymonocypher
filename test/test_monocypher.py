@@ -338,3 +338,120 @@ class TestMonocypher(unittest.TestCase):
         # use fast nb_blocks and nb_passes values for unit test, do not use these in production
         hash = monocypher.argon2i_32(8, 3, b'12345', b'salt')
         self.assertEqual(expect, hash)
+
+    def test_argon2i_32_zero_iterations(self):
+        with self.assertRaises(ValueError):
+            monocypher.argon2i_32(8, 0, b'password', b'saltsalt')
+
+    def test_argon2i_32_bytes_password_not_wiped(self):
+        password = b'hunter22'
+        monocypher.argon2i_32(8, 1, password, b'saltsalt')
+        self.assertEqual(b'hunter22', password)
+        # single-byte bytes objects are interpreter-wide singletons
+        monocypher.argon2i_32(8, 1, b'p', b'saltsalt')
+        self.assertEqual(112, b'p'[0])
+
+    def test_argon2i_32_bytearray_password_wiped(self):
+        password = bytearray(b'hunter22')
+        expect = monocypher.argon2i_32(8, 1, bytes(password), b'saltsalt')
+        self.assertEqual(expect, monocypher.argon2i_32(8, 1, password, b'saltsalt'))
+        self.assertEqual(bytearray(8), password)
+        password = bytearray(b'hunter22')
+        monocypher.argon2i_32(8, 1, password, b'saltsalt', _wipe=False)
+        self.assertEqual(bytearray(b'hunter22'), password)
+
+    def test_wipe(self):
+        data = bytearray(b'secret')
+        monocypher.wipe(data)
+        self.assertEqual(bytearray(6), data)
+        with self.assertRaises(ValueError):
+            monocypher.wipe(b'a')
+        self.assertEqual(97, b'a'[0])
+
+    def test_lock_unlock_invalid_length(self):
+        key, nonce = bytes(32), bytes(24)
+        mac, ct = monocypher.lock(key, nonce, b'message')
+        for k, n in [(b'', nonce), (key[:31], nonce), (key + b'\x00', nonce),
+                     (key, b''), (key, nonce[:23]), (key, nonce + b'\x00')]:
+            with self.assertRaises(ValueError):
+                monocypher.lock(k, n, b'message')
+            with self.assertRaises(ValueError):
+                monocypher.unlock(k, n, mac, ct)
+        for m in [b'', mac[:15], mac + b'\x00']:
+            with self.assertRaises(ValueError):
+                monocypher.unlock(key, nonce, m, ct)
+        self.assertEqual(b'message', monocypher.unlock(key, nonce, mac, ct))
+
+    def test_IncrementalAuthenticatedEncryption_invalid_nonce_message(self):
+        with self.assertRaisesRegex(ValueError, 'nonce length 23 != 24'):
+            monocypher.IncrementalAuthenticatedEncryption(bytes(32), bytes(23))
+
+    def test_chacha20_invalid_key_length(self):
+        for key in [b'', b'A', bytes(31), bytes(33)]:
+            for nonce in [bytes(24), bytes(8)]:
+                with self.assertRaises(ValueError):
+                    monocypher.chacha20(key, nonce, b'message')
+
+    def test_signature_check_invalid_length(self):
+        secret, public = monocypher.generate_signing_key_pair()
+        sig = monocypher.signature_sign(secret, b'message')
+        for s, p in [(b'', public), (sig[:63], public), (sig + b'\x00', public),
+                     (sig, b''), (sig, public[:31]), (sig, public + b'\x00')]:
+            with self.assertRaises(ValueError):
+                monocypher.signature_check(s, p, b'message')
+        self.assertTrue(monocypher.signature_check(sig, public, b'message'))
+
+    def test_blake2b_key_length(self):
+        msg = b'message'
+        key = bytes(range(64))
+        expect = hashlib.blake2b(msg, key=key).digest()
+        self.assertEqual(expect, monocypher.blake2b(msg, key))
+        b = monocypher.Blake2b(key=key)
+        b.update(msg)
+        self.assertEqual(expect, b.finalize())
+        for n in [65, 128, 129, 200, 4096]:
+            with self.assertRaises(ValueError):
+                monocypher.blake2b(msg, b'A' * n)
+            with self.assertRaises(ValueError):
+                monocypher.Blake2b(key=b'A' * n)
+
+    def test_Blake2b_hash_size(self):
+        for n in [1, 32, 64]:
+            b = monocypher.Blake2b(hash_size=n)
+            b.update(b'message')
+            self.assertEqual(hashlib.blake2b(b'message', digest_size=n).digest(), b.finalize())
+        for n in [-1, 0, 65, 100]:
+            with self.assertRaises(ValueError):
+                monocypher.Blake2b(hash_size=n)
+
+    def test_Blake2b_finalize_once(self):
+        b = monocypher.Blake2b()
+        b.update(b'message')
+        b.finalize()
+        with self.assertRaises(RuntimeError):
+            b.finalize()
+        with self.assertRaises(RuntimeError):
+            b.update(b'message')
+
+    def test_crypto_verify(self):
+        for fn, n in [(monocypher.crypto_verify16, 16),
+                      (monocypher.crypto_verify32, 32),
+                      (monocypher.crypto_verify64, 64)]:
+            a = bytes(range(n))
+            self.assertEqual(0, fn(a, bytes(a)))
+            self.assertNotEqual(0, fn(a, bytes(n)))
+            for bad in [b'', a[:-1], a + b'\x00']:
+                with self.assertRaises(ValueError):
+                    fn(bad, bad)
+                with self.assertRaises(ValueError):
+                    fn(a, bad)
+
+    def test_deprecated_key_exchange_invalid_length(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            with self.assertRaises(ValueError):
+                monocypher.compute_key_exchange_public_key(b'')
+            with self.assertRaises(ValueError):
+                monocypher.key_exchange(bytes(32), bytes(31))
+            with self.assertRaises(ValueError):
+                monocypher.key_exchange(bytes(31), bytes(32))
