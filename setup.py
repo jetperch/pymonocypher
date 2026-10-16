@@ -11,7 +11,7 @@ import setuptools
 import os
 
 MYPATH = os.path.abspath(os.path.dirname(__file__))
-VERSION = '4.0.3.4'  # also change c_monocypher.pyx, debian/changelog
+VERSION = '4.0.3.5'  # also change c_monocypher.pyx, debian/changelog
 
 
 try:
@@ -52,7 +52,8 @@ setuptools.setup(
     url='https://github.com/jetperch/pymonocypher',
     author='Jetperch LLC',
     author_email='joulescope-dev@jetperch.com',
-    license='BSD 2-clause',
+    license_expression='BSD-2-Clause OR CC0-1.0',
+    license_files=['LICENSE.txt'],
 
     # Classifiers help users find your project by categorizing it.
     #
@@ -60,23 +61,21 @@ setuptools.setup(
     classifiers=[  # Optional
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
-        'License :: OSI Approved :: BSD License',
-        'License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication',
         'Natural Language :: English',
         'Topic :: Security :: Cryptography',
 
         # Supported Python versions
-        'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: 3.14',
+        'Programming Language :: Python :: 3.15',
         'Programming Language :: C',
     ],
 
     keywords='cryto cryptography monocypher chacha blake2b 25519',
     install_requires=[],
     ext_modules=extensions,
-    python_requires='~=3.11',
+    python_requires='~=3.12',
 
     project_urls={
         'Bug Reports': 'https://github.com/jetperch/pymonocypher/issues',

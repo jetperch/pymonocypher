@@ -4,6 +4,15 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.5
+
+2026 Oct 16
+
+* Added Python 3.15 build.
+* Fixed setup.py to indicate Python 3.11 was dropped.
+* Replaced the deprecated license classifiers with an SPDX license expression.
+
+
 # 4.0.3.4
 
 2026 Oct 8

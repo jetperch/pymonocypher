@@ -42,12 +42,12 @@ jobs:
           echo "runner.arch=$RUNNER_ARCH"
 
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -92,7 +92,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest", "windows-11-arm", "macos-latest"]
-        python_version: ["cp312", "cp313", "cp314"]
+        python_version: ["cp312", "cp313", "cp314", "cp315"]
 
     steps:
       - name: Download sdist
@@ -107,12 +107,12 @@ jobs:
         run: echo "filename=$(ls dist/*.tar.gz)" >> $GITHUB_OUTPUT
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==4.2.0
+        run: python -m pip install cibuildwheel==4.3.1
 
       - name: Build wheels
         env:
@@ -164,7 +164,7 @@ jobs:
         run: ls dist/*
 
       - name: Publish packages to PyPi
-        uses: pypa/gh-action-pypi-publish@v1.14.0
+        uses: pypa/gh-action-pypi-publish@v1.14.2
         with:
           print-hash: true
 
@@ -184,7 +184,7 @@ jobs:
       matrix:
         CC: ["clang", "gcc"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         run: |
           sudo apt update;

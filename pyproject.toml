@@ -19,6 +19,6 @@
 # Minimum requirements for the build system to execute.
 requires = [
     "Cython",
-    "setuptools",
+    "setuptools>=77",  # SPDX license expression (PEP 639)
     "wheel",
 ]
