@@ -4,6 +4,13 @@
 This file contains the list of changes made to pymonocypher.
 
 
+# 4.0.3.6
+
+2026 Oct 19 [in progress, unreleased]
+
+* Added build-backend to pyproject.toml.
+
+
 # 4.0.3.5
 
 2026 Oct 16
